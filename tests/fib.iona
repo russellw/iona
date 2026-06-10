@@ -1,0 +1,19 @@
+# Iterative Fibonacci, showing assignment and a while loop.
+# Assignment is postfix too: `value name =` stores value into name.
+
+def fib n:
+    0 a =
+    1 b =
+    0 i =
+    i n < while:
+        a b + t =
+        b a =
+        t b =
+        i 1 + i =
+    a return
+
+def main:
+    0 i =
+    i 10 < while:
+        i fib print
+        i 1 + i =

@@ -1,3 +1,11 @@
+# Iona build artifacts: C emitted next to sources, and compiled executables.
+examples/*.c
+tests/*.c
+examples/factorial
+examples/fib
+/factorial
+/fib
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

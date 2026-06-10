@@ -1,0 +1,18 @@
+# Exercises arithmetic, comparisons, if/else, and nested calls.
+
+def max a b:
+    a b < if:
+        b return
+    else:
+        a return
+
+def main:
+    2 3 4 * + print          # 2 + (3*4) = 14
+    20 7 % print             # 6
+    100 9 / print            # 11
+    3 8 max print            # 8
+    8 3 max print            # 8
+    5 5 == if:
+        "equal" print
+    else:
+        "no" print

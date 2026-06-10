@@ -1,0 +1,11 @@
+# Recursive factorial.
+# Within a line the syntax is postfix: `n 1 -` is n - 1, `n factorial` calls it.
+
+def factorial n:
+    n 1 <= if:
+        1 return
+    n  n 1 - factorial  *  return
+
+def main:
+    5 factorial print     # 120
+    10 factorial print    # 3628800
