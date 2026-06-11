@@ -3,6 +3,7 @@ examples/*.c
 tests/*.c
 examples/factorial
 examples/fib
+examples/cleanup
 /factorial
 /fib
 

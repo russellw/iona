@@ -99,8 +99,29 @@ x 1 + x =      # x = x + 1
 | `+ - * / %` | integer arithmetic                       |
 | `== != < > <= >=` | comparisons (yield `0` / `1`)      |
 | `x print`   | print an integer or string, then newline |
-| `v return`  | return `v` from the current function     |
-| `return`    | return `0`                               |
+| `v return`  | set the function's return value to `v`   |
+| `return`    | set the function's return value to `0`   |
+
+### Return values and cleanup
+
+Iona has no destructors, so cleanup code (closing files, freeing buffers) must
+run explicitly. To make sure it always gets a chance, **`return` does not exit
+the function** — it only *sets* the value to be returned. Execution continues
+to the end of the function, which is the single point where it actually
+returns. Anything after a `return` still runs:
+
+```
+def read_squared x:
+    "open file" print
+    x x * return          # set the result
+    "close file" print    # still runs -- cleanup is never skipped
+
+# prints: open file / close file / then main prints 25 for read_squared(5)
+```
+
+A consequence: because `return` no longer skips the rest of the function, use
+`if`/`else` (not a bare early `return`) when one branch must not run the other.
+A function's return value defaults to `0` if `return` is never reached.
 
 ### Literals and comments
 

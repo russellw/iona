@@ -4,7 +4,8 @@
 def factorial n:
     n 1 <= if:
         1 return
-    n  n 1 - factorial  *  return
+    else:
+        n  n 1 - factorial  *  return
 
 def main:
     5 factorial print     # 120

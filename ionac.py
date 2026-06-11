@@ -300,11 +300,14 @@ class CodeGen:
     def gen_func(self, d):
         ctx = FuncCtx(d.params)
         self.gen_body(d.body, ctx, indent=1)
-        if d.name == "main":
-            ctx.emit("    return 0;")
+        # `return` only *sets* the result; the function always falls through to
+        # this single exit point, so cleanup code placed after a `return` still
+        # runs (Iona has no destructors). `_ret` defaults to 0.
         head = [self.signature(d) + " {"]
+        ret_decl = ["    int _ret = 0;"]
         decls = [f"    int {name};" for name in ctx.locals]
-        return head + decls + ctx.lines + ["}"]
+        tail = ["    return _ret;", "}"]
+        return head + ret_decl + decls + ctx.lines + tail
 
     def gen_body(self, stmts, ctx, indent):
         for s in stmts:
@@ -405,11 +408,13 @@ class CodeGen:
         if name == "return":
             if not allow_effects:
                 raise IonaError(t.lineno, "`return` cannot be used in a condition")
+            # Set the return value but keep executing: any cleanup statements
+            # after this point still run before the function actually returns.
             if stack:
                 v = stack.pop()
-                ctx.emit(f"{pad}return {v.expr};")
+                ctx.emit(f"{pad}_ret = {v.expr};")
             else:
-                ctx.emit(f"{pad}return 0;")
+                ctx.emit(f"{pad}_ret = 0;")
             return
         if name in self.funcs:
             d = self.funcs[name]
