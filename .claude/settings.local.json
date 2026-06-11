@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 ionac.py examples/factorial.iona -c -o /tmp/factorial.c)",
+      "Read(//tmp/**)",
+      "Bash(python3 ionac.py examples/factorial.iona -r)",
+      "Bash(python3 ionac.py examples/fib.iona -r)",
+      "Bash(python3 ionac.py tests/arith.iona -r)",
+      "Bash(python3 *)",
+      "Bash(git add *)"
+    ]
+  }
+}
