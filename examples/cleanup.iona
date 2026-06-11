@@ -1,11 +1,11 @@
-# Iona's `return` sets the result but does NOT exit the function. Execution
-# continues to the end, so resource-cleanup statements placed after a `return`
-# always get a chance to run -- the language has no destructors.
+# IONA'S `RETURN` SETS THE RESULT BUT DOES NOT EXIT THE FUNCTION. EXECUTION
+# CONTINUES TO THE END, SO RESOURCE-CLEANUP STATEMENTS PLACED AFTER A `RETURN`
+# ALWAYS GET A CHANCE TO RUN -- THE LANGUAGE HAS NO DESTRUCTORS.
 
-def read_squared x:
-    "open file" print
-    x x * return          # set the result we want to hand back
-    "close file" print    # still runs, even though we already "returned"
+DEF READSQUARED X:
+    "OPEN FILE" PRINT
+    X X * RETURN          # SET THE RESULT WE WANT TO HAND BACK
+    "CLOSE FILE" PRINT    # STILL RUNS, EVEN THOUGH WE ALREADY "RETURNED"
 
-def main:
-    5 read_squared print
+DEF MAIN:
+    5 READSQUARED PRINT

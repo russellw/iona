@@ -1,33 +1,33 @@
-# Short-circuit logical operators: `and`, `or`, `not`.
+# SHORT-CIRCUIT LOGICAL OPERATORS: `AND`, `OR`, `NOT`.
 #
-# They are condition-only control-flow words. Each one short-circuits, so a
-# guarded call on the dead side is never evaluated -- `boom` must stay silent.
+# THEY ARE CONDITION-ONLY CONTROL-FLOW WORDS. EACH ONE SHORT-CIRCUITS, SO A
+# GUARDED CALL ON THE DEAD SIDE IS NEVER EVALUATED -- `BOOM` MUST STAY SILENT.
 
-def boom:
-    "boom: short-circuit failed!" print
-    0 return
+DEF BOOM:
+    "BOOM: SHORT-CIRCUIT FAILED!" PRINT
+    0 RETURN
 
-def main:
-    5 0 > 5 100 < and if:           # both true
-        "and-true" print
+DEF MAIN:
+    5 0 > 5 100 < AND IF:           # BOTH TRUE
+        "AND-TRUE" PRINT
 
-    0 1 > boom 0 > and if:          # left false: boom must be skipped
-        "unreachable" print
-    else:
-        "and-false" print
+    0 1 > BOOM 0 > AND IF:          # LEFT FALSE: BOOM MUST BE SKIPPED
+        "UNREACHABLE" PRINT
+    ELSE:
+        "AND-FALSE" PRINT
 
-    0 1 > 7 0 > or if:              # right true
-        "or-true" print
+    0 1 > 7 0 > OR IF:              # RIGHT TRUE
+        "OR-TRUE" PRINT
 
-    1 0 > boom 0 > or if:           # left true: boom must be skipped
-        "or-short" print
+    1 0 > BOOM 0 > OR IF:           # LEFT TRUE: BOOM MUST BE SKIPPED
+        "OR-SHORT" PRINT
 
-    1 0 < not if:                   # not false -> true
-        "not-true" print
+    1 0 < NOT IF:                   # NOT FALSE -> TRUE
+        "NOT-TRUE" PRINT
 
-    50 0 > 50 100 < and not if:     # not (true) -> false
-        "unreachable" print
-    else:
-        "not-false" print
+    50 0 > 50 100 < AND NOT IF:     # NOT (TRUE) -> FALSE
+        "UNREACHABLE" PRINT
+    ELSE:
+        "NOT-FALSE" PRINT
 
-    "done" print
+    "DONE" PRINT

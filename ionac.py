@@ -4,9 +4,11 @@
 Iona is an experimental systems language:
   - Procedural, with block structure defined by indentation (like Python).
   - Within a statement, the syntax is postfix (like Forth): operands precede
-    the operator, so `3 4 +` means 3 + 4 and `n factorial` calls factorial(n).
+    the operator, so `3 4 +` means 3 + 4 and `N FACTORIAL` calls FACTORIAL(N).
   - Compiles directly to machine code (this v0 emits C and hands it to `cc`).
   - No garbage collection: locals are plain machine words.
+  - Source is UPPERCASE with ALGOL-style operators (`=`, `<>`, `:=`), staying
+    within a 1960s teletype's character set.
 
 This file is the whole toolchain for the v0 language: tokenizer, an
 indentation-based block parser, and a code generator that lowers postfix
@@ -33,17 +35,28 @@ class IonaError(Exception):
 # Tokenizer
 # --------------------------------------------------------------------------
 
+# Surface operators, period-accurate ALGOL-style spellings: `=` is equality,
+# `<>` is not-equal, and `:=` is assignment (lexed in the `:` branch below).
 # Multi-character operators must be tried before their single-char prefixes.
-OPERATORS = ["<=", ">=", "==", "!=", "<", ">", "=", "+", "-", "*", "/", "%"]
-BINOPS = {"<=", ">=", "==", "!=", "<", ">", "+", "-", "*", "/", "%"}
-COMPARES = {"<=", ">=", "==", "!=", "<", ">"}
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"]
+BINOPS = {"<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"}
+COMPARES = {"<=", ">=", "<>", "<", ">", "="}
+
+# C spellings for the operators whose Iona form differs.
+C_OP = {"=": "==", "<>": "!="}
 
 # Short-circuit logical connectives. They are condition-only control-flow
 # words (lowered to branches), deliberately *not* value-producing operators --
-# bitwise operators will get their own symbolic spelling.
-LOGICAL = {"and", "or", "not"}
+# bitwise operators will get their own spelling. Uppercase like all keywords:
+# a 1960s teletype (the ASR-33) had no lowercase letters at all.
+LOGICAL = {"AND", "OR", "NOT"}
 
-_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Identifiers are UPPERCASE letters and digits only. A 1960s teletype (the
+# ASR-33) printed no lowercase, and its 0x5F position was a left-arrow, not `_`,
+# so both lowercase and underscore are excluded for historical plausibility.
+# Excluding underscore also keeps user names clear of the compiler's own
+# `_`-prefixed temporaries and labels.
+_NAME_RE = re.compile(r"[A-Z][A-Z0-9]*")
 _INT_RE = re.compile(r"[0-9]+")
 
 
@@ -72,6 +85,10 @@ def tokenize_line(text, lineno):
         if c == "#":
             break  # rest of line is a comment
         if c == ":":
+            if text.startswith(":=", i):
+                toks.append(Token("op", ":=", lineno))  # assignment
+                i += 2
+                continue
             toks.append(Token("colon", ":", lineno))
             i += 1
             continue
@@ -191,8 +208,8 @@ class Parser:
             line = self.lines[self.i]
             if line.indent != 0:
                 raise IonaError(line.lineno, "unexpected indentation at top level")
-            if not (is_header(line.tokens) and line.tokens[0].value == "def"):
-                raise IonaError(line.lineno, "only `def` declarations are allowed at top level")
+            if not (is_header(line.tokens) and line.tokens[0].value == "DEF"):
+                raise IonaError(line.lineno, "only `DEF` declarations are allowed at top level")
             defs.append(self.parse_def())
         return defs
 
@@ -202,7 +219,7 @@ class Parser:
         # def name param1 param2 ...
         names = [t.value for t in body_toks[1:]]
         if not body_toks[1:] or any(t.kind != "name" for t in body_toks[1:]):
-            raise IonaError(line.lineno, "malformed def header: expected `def name params:`")
+            raise IonaError(line.lineno, "malformed def header: expected `DEF NAME PARAMS:`")
         for nm in names:
             if nm in LOGICAL:
                 raise IonaError(line.lineno, f"`{nm}` is a reserved logical operator and cannot be a name")
@@ -232,21 +249,21 @@ class Parser:
         if is_header(toks):
             head = toks[:-1]  # without colon
             kw = head[-1].value if head else None
-            if head and head[0].value == "def":
+            if head and head[0].value == "DEF":
                 return self.parse_def()
-            if kw == "if":
+            if kw == "IF":
                 self.i += 1
                 then_body = self.parse_block(indent)
                 else_body = None
-                # optional `else:` at the same indentation
+                # optional `ELSE:` at the same indentation
                 if (self.i < len(self.lines)
                         and self.lines[self.i].indent == indent
                         and is_header(self.lines[self.i].tokens)
-                        and self.lines[self.i].tokens[0].value == "else"):
+                        and self.lines[self.i].tokens[0].value == "ELSE"):
                     self.i += 1
                     else_body = self.parse_block(indent)
                 return If(head[:-1], then_body, else_body, line.lineno)
-            if kw == "while":
+            if kw == "WHILE":
                 self.i += 1
                 body = self.parse_block(indent)
                 return While(head[:-1], body, line.lineno)
@@ -353,11 +370,17 @@ class CodeGen:
             out.append("")
         return "\n".join(out)
 
+    @staticmethod
+    def cname(name):
+        # C's entry point must be the lowercase `main`; every other Iona name is
+        # already a valid (uppercase) C identifier and is used verbatim.
+        return "main" if name == "MAIN" else name
+
     def signature(self, d):
-        if d.name == "main" and not d.params:
+        if d.name == "MAIN" and not d.params:
             return "int main(void)"
         params = ", ".join(f"int {p}" for p in d.params)
-        return f"int {d.name}({params})"
+        return f"int {self.cname(d.name)}({params})"
 
     def gen_func(self, d):
         ctx = FuncCtx(d.params)
@@ -423,8 +446,8 @@ class CodeGen:
         """Build a boolean expression tree from a postfix condition.
 
         This is a pure compile-time pass: it emits no code, only assembles
-        nodes on a stack. `and`/`or`/`not` are control-flow words, valid only
-        here; assignment, `print`, and `return` are rejected.
+        nodes on a stack. `AND`/`OR`/`NOT` are control-flow words, valid only
+        here; assignment, `PRINT`, and `RETURN` are rejected.
         """
         stack = []
         for t in tokens:
@@ -433,7 +456,7 @@ class CodeGen:
             elif t.kind == "str":
                 stack.append(StrNode(t.value, t.lineno))
             elif t.kind == "op":
-                if t.value == "=":
+                if t.value == ":=":
                     raise IonaError(t.lineno, "assignment is not allowed in a condition")
                 if len(stack) < 2:
                     raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
@@ -445,18 +468,18 @@ class CodeGen:
                     stack.append(BinNode(t.value, a, b, t.lineno))
             elif t.kind == "name":
                 name = t.value
-                if name == "not":
+                if name == "NOT":
                     if not stack:
-                        raise IonaError(t.lineno, "`not` needs one operand")
+                        raise IonaError(t.lineno, "`NOT` needs one operand")
                     stack.append(NotNode(self.as_bool(stack.pop()), t.lineno))
-                elif name in ("and", "or"):
+                elif name in ("AND", "OR"):
                     if len(stack) < 2:
                         raise IonaError(t.lineno, f"`{name}` needs two operands")
                     b = self.as_bool(stack.pop())
                     a = self.as_bool(stack.pop())
-                    cls = AndNode if name == "and" else OrNode
+                    cls = AndNode if name == "AND" else OrNode
                     stack.append(cls(a, b, t.lineno))
-                elif name in ("print", "return"):
+                elif name in ("PRINT", "RETURN"):
                     raise IonaError(t.lineno, f"`{name}` cannot be used in a condition")
                 elif name in self.funcs:
                     d = self.funcs[name]
@@ -524,7 +547,7 @@ class CodeGen:
         b = self.emit_value(node.b, ctx, pad)
         if a.type != "int" or b.type != "int":
             raise IonaError(node.lineno, f"comparison `{node.op}` requires integers")
-        cmp = f"({a.expr} {node.op} {b.expr})"
+        cmp = f"({a.expr} {C_OP.get(node.op, node.op)} {b.expr})"
         if t_lbl is not None and f_lbl is not None:
             ctx.emit(f"{pad}if {cmp} goto {t_lbl};")
             ctx.emit(f"{pad}goto {f_lbl};")
@@ -552,16 +575,16 @@ class CodeGen:
             b = self.emit_value(node.b, ctx, pad)
             if a.type != "int" or b.type != "int":
                 raise IonaError(node.lineno, f"operator `{node.op}` requires integers")
-            return Value(f"({a.expr} {node.op} {b.expr})", "int")
+            return Value(f"({a.expr} {C_OP.get(node.op, node.op)} {b.expr})", "int")
         if isinstance(node, RelNode):
             a = self.emit_value(node.a, ctx, pad)
             b = self.emit_value(node.b, ctx, pad)
             if a.type != "int" or b.type != "int":
                 raise IonaError(node.lineno, f"comparison `{node.op}` requires integers")
-            return Value(f"({a.expr} {node.op} {b.expr})", "int")
+            return Value(f"({a.expr} {C_OP.get(node.op, node.op)} {b.expr})", "int")
         if isinstance(node, CallNode):
             args = [self.emit_value(a, ctx, pad) for a in node.args]
-            call = f"{node.name}(" + ", ".join(a.expr for a in args) + ")"
+            call = f"{self.cname(node.name)}(" + ", ".join(a.expr for a in args) + ")"
             tmp = ctx.new_tmp()
             ctx.emit(f"{pad}int {tmp} = {call};")
             return Value(tmp, "int")
@@ -575,7 +598,7 @@ class CodeGen:
             elif t.kind == "str":
                 stack.append(Value(self.c_string(t.value), "str"))
             elif t.kind == "op":
-                if t.value == "=":
+                if t.value == ":=":
                     self.op_assign(t, ctx, stack, pad, allow_effects)
                 else:
                     self.op_binary(t, stack)
@@ -591,7 +614,7 @@ class CodeGen:
         a = stack.pop()
         if a.type != "int" or b.type != "int":
             raise IonaError(t.lineno, f"operator `{t.value}` requires integers")
-        stack.append(Value(f"({a.expr} {t.value} {b.expr})", "int"))
+        stack.append(Value(f"({a.expr} {C_OP.get(t.value, t.value)} {b.expr})", "int"))
 
     def op_assign(self, t, ctx, stack, pad, allow_effects):
         if not allow_effects:
@@ -613,18 +636,18 @@ class CodeGen:
         name = t.value
         if name in LOGICAL:
             raise IonaError(t.lineno, f"`{name}` is a logical operator and is only allowed in a condition")
-        if name == "print":
+        if name == "PRINT":
             if not allow_effects:
-                raise IonaError(t.lineno, "`print` cannot be used in a condition")
+                raise IonaError(t.lineno, "`PRINT` cannot be used in a condition")
             if not stack:
-                raise IonaError(t.lineno, "`print` needs a value")
+                raise IonaError(t.lineno, "`PRINT` needs a value")
             v = stack.pop()
             fmt = "%s" if v.type == "str" else "%d"
             ctx.emit(f'{pad}printf("{fmt}\\n", {v.expr});')
             return
-        if name == "return":
+        if name == "RETURN":
             if not allow_effects:
-                raise IonaError(t.lineno, "`return` cannot be used in a condition")
+                raise IonaError(t.lineno, "`RETURN` cannot be used in a condition")
             # Set the return value but keep executing: any cleanup statements
             # after this point still run before the function actually returns.
             if stack:
@@ -639,7 +662,7 @@ class CodeGen:
             if len(stack) < arity:
                 raise IonaError(t.lineno, f"`{name}` needs {arity} argument(s)")
             args = [stack.pop() for _ in range(arity)][::-1]
-            call = f"{name}(" + ", ".join(a.expr for a in args) + ")"
+            call = f"{self.cname(name)}(" + ", ".join(a.expr for a in args) + ")"
             # Materialize into a temp so the call's evaluation order is pinned.
             tmp = ctx.new_tmp()
             ctx.emit(f"{pad}int {tmp} = {call};")
@@ -673,8 +696,8 @@ class CodeGen:
 def compile_source(src):
     lines = read_lines(src)
     defs = Parser(lines).parse_module()
-    if "main" not in {d.name for d in defs}:
-        raise IonaError(0, "program has no `main` function")
+    if "MAIN" not in {d.name for d in defs}:
+        raise IonaError(0, "program has no `MAIN` function")
     return CodeGen(defs).generate()
 
 

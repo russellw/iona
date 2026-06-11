@@ -1,12 +1,12 @@
-# Recursive factorial.
-# Within a line the syntax is postfix: `n 1 -` is n - 1, `n factorial` calls it.
+# RECURSIVE FACTORIAL.
+# WITHIN A LINE THE SYNTAX IS POSTFIX: `N 1 -` IS N - 1, `N FACTORIAL` CALLS IT.
 
-def factorial n:
-    n 1 <= if:
-        1 return
-    else:
-        n  n 1 - factorial  *  return
+DEF FACTORIAL N:
+    N 1 <= IF:
+        1 RETURN
+    ELSE:
+        N  N 1 - FACTORIAL  *  RETURN
 
-def main:
-    5 factorial print     # 120
-    10 factorial print    # 3628800
+DEF MAIN:
+    5 FACTORIAL PRINT     # 120
+    10 FACTORIAL PRINT    # 3628800

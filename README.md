@@ -5,10 +5,10 @@ that are not usually found together:
 
 - **A systems language**, like C or Pascal: it compiles directly to machine
   code and has no garbage collector. Values are plain machine words.
-- **Indentation-based block structure**, like Python: `if`, `while`, and `def`
+- **Indentation-based block structure**, like Python: `IF`, `WHILE`, and `DEF`
   open an indented suite, with no `begin`/`end` or braces.
 - **Postfix expressions within a line**, like Forth: operands come before the
-  operator, so `3 4 +` means `3 + 4`, and `n factorial` calls `factorial(n)`.
+  operator, so `3 4 +` means `3 + 4`, and `N FACTORIAL` calls `FACTORIAL(N)`.
   There are no parentheses and no operator-precedence rules to memorize.
 
 This repository contains `ionac.py`, the v0 compiler. It is written in Python
@@ -33,17 +33,31 @@ python3 tests/run_tests.py
 
 ## The language (v0)
 
-A program is a sequence of `def` declarations. Execution begins at `main`.
+A program is a sequence of `DEF` declarations. Execution begins at `MAIN`.
 
 ```
-def factorial n:
-    n 1 <= if:
-        1 return
-    n  n 1 - factorial  *  return
+DEF FACTORIAL N:
+    N 1 <= IF:
+        1 RETURN
+    ELSE:
+        N  N 1 - FACTORIAL  *  RETURN
 
-def main:
-    5 factorial print     # 120
+DEF MAIN:
+    5 FACTORIAL PRINT     # 120
 ```
+
+### A historical character set
+
+Iona deliberately stays within the characters available on a 1960s teletype
+such as the Teletype Model 33: the 64-character set `0x20`–`0x5F`. Two
+consequences shape the surface syntax:
+
+- **Source is UPPERCASE.** That hardware had no lowercase letters at all.
+  Identifiers are uppercase letters and digits (no underscore — its code point
+  printed a left-arrow on a 1963 machine).
+- **ALGOL-style operators.** Equality is `=`, not-equal is `<>`, and assignment
+  is `:=` — the period-accurate spellings, all typeable on the machine. (The
+  `==`/`!=`/`=` convention is a 1972-era C-ism.)
 
 ### Lines are postfix token streams
 
@@ -52,8 +66,8 @@ from it — exactly like Forth, but the stack is resolved at compile time, so th
 generated code is ordinary efficient C with no runtime stack.
 
 - `2 3 4 * +`  →  `2 + (3 * 4)`  →  `14`
-- `n 1 -`  →  `n - 1`
-- `a b max`  →  `max(a, b)`
+- `N 1 -`  →  `N - 1`
+- `A B MAX`  →  `MAX(A, B)`
 
 ### Declarations read prefix
 
@@ -61,7 +75,7 @@ Declarations are the one deliberate exception to postfix order, because they
 name a thing rather than compute a value:
 
 ```
-def name param1 param2:
+DEF NAME PARAM1 PARAM2:
     <body>
 ```
 
@@ -72,37 +86,37 @@ All parameters and values are integers in v0.
 The condition is evaluated first and the keyword consumes it:
 
 ```
-n 0 > if:
-    "positive" print
-else:
-    "not positive" print
+N 0 > IF:
+    "POSITIVE" PRINT
+ELSE:
+    "NOT POSITIVE" PRINT
 
-i n < while:
-    i print
-    i 1 + i =
+I N < WHILE:
+    I PRINT
+    I 1 + I :=
 ```
 
 ### Logical operators (conditions only)
 
-`and`, `or`, and `not` combine conditions and **short-circuit**: `or` stops at
-the first true operand, `and` at the first false one, and a guarded call on the
+`AND`, `OR`, and `NOT` combine conditions and **short-circuit**: `OR` stops at
+the first true operand, `AND` at the first false one, and a guarded call on the
 skipped side is never evaluated.
 
 ```
-x 0 >  x 100 <  and if:        # 0 < x < 100
-    "in range" print
+X 0 >  X 100 <  AND IF:        # 0 < X < 100
+    "IN RANGE" PRINT
 
-p 0 ==  p valid  or if:        # `p valid` is not called when p == 0
-    "ok" print
+P 0 =  P VALID  OR IF:         # `P VALID` is not called when P = 0
+    "OK" PRINT
 
-done not while:
-    step
+DONE NOT WHILE:
+    STEP
 ```
 
 They are control-flow words, not value-producing operators, so they are allowed
-**only** in the condition of an `if` or `while`. They do not double as bitwise
-operators: bitwise `and`/`or`/`xor`/`not` will get their own symbolic spelling
-(`&`, `|`, `^`, `~`) and remain ordinary value operators.
+**only** in the condition of an `IF` or `WHILE`. They do not double as bitwise
+operators: a future bitwise set will get its own spelling (and since `| ^ ~`
+are not on a 1960s teletype, word forms are the likely choice).
 
 Under the hood a condition is compiled as *jumping code*: instead of computing a
 `0`/`1` and testing it, each part branches straight to a true- or false-label.
@@ -112,11 +126,11 @@ compare-and-branch output, with no boolean ever materialized in a register.
 ### Assignment
 
 Assignment is itself a postfix operator: push a value, push a target name, then
-`=`. Variables are declared automatically on first assignment.
+`:=`. Variables are declared automatically on first assignment.
 
 ```
-5 x =          # x = 5
-x 1 + x =      # x = x + 1
+5 X :=          # X = 5
+X 1 + X :=      # X = X + 1
 ```
 
 ### Built-ins
@@ -124,37 +138,38 @@ x 1 + x =      # x = x + 1
 | Form        | Meaning                                  |
 |-------------|------------------------------------------|
 | `+ - * / %` | integer arithmetic                       |
-| `== != < > <= >=` | comparisons (yield `0` / `1`)      |
-| `and or not` | short-circuit logical operators (conditions only) |
-| `x print`   | print an integer or string, then newline |
-| `v return`  | set the function's return value to `v`   |
-| `return`    | set the function's return value to `0`   |
+| `= <> < > <= >=` | comparisons (yield `0` / `1`)       |
+| `AND OR NOT` | short-circuit logical operators (conditions only) |
+| `VALUE NAME :=` | assign `VALUE` into `NAME`            |
+| `X PRINT`   | print an integer or string, then newline |
+| `V RETURN`  | set the function's return value to `V`   |
+| `RETURN`    | set the function's return value to `0`   |
 
 ### Return values and cleanup
 
 Iona has no destructors, so cleanup code (closing files, freeing buffers) must
-run explicitly. To make sure it always gets a chance, **`return` does not exit
+run explicitly. To make sure it always gets a chance, **`RETURN` does not exit
 the function** — it only *sets* the value to be returned. Execution continues
 to the end of the function, which is the single point where it actually
-returns. Anything after a `return` still runs:
+returns. Anything after a `RETURN` still runs:
 
 ```
-def read_squared x:
-    "open file" print
-    x x * return          # set the result
-    "close file" print    # still runs -- cleanup is never skipped
+DEF READSQUARED X:
+    "OPEN FILE" PRINT
+    X X * RETURN          # set the result
+    "CLOSE FILE" PRINT    # still runs -- cleanup is never skipped
 
-# prints: open file / close file / then main prints 25 for read_squared(5)
+# prints: OPEN FILE / CLOSE FILE / then MAIN prints 25 for READSQUARED(5)
 ```
 
-A consequence: because `return` no longer skips the rest of the function, use
-`if`/`else` (not a bare early `return`) when one branch must not run the other.
-A function's return value defaults to `0` if `return` is never reached.
+A consequence: because `RETURN` no longer skips the rest of the function, use
+`IF`/`ELSE` (not a bare early `RETURN`) when one branch must not run the other.
+A function's return value defaults to `0` if `RETURN` is never reached.
 
 ### Literals and comments
 
 - Integer literals: `0`, `42`, `3628800`.
-- String literals: `"hello"` (usable as a `print` argument), with `\n`, `\t`,
+- String literals: `"HELLO"` (usable as a `PRINT` argument), with `\n`, `\t`,
   `\"`, `\\` escapes.
 - Comments run from `#` to end of line.
 - Indentation uses spaces; tabs are rejected.
@@ -165,14 +180,14 @@ A function's return value defaults to `0` if `return` is never reached.
 
 1. **Tokenizer** — splits each physical line into postfix tokens.
 2. **Line reader** — measures indentation and drops blank/comment lines.
-3. **Block parser** — turns indentation into a nested AST of `def`, `if`,
-   `while`, and statement nodes.
+3. **Block parser** — turns indentation into a nested AST of `DEF`, `IF`,
+   `WHILE`, and statement nodes.
 4. **Code generator** — lowers each postfix statement by walking the tokens
    with a *compile-time operand stack* of C expression strings. Function calls
    are materialized into temporaries so evaluation order is well defined.
    Conditions take a separate path: they are built into a small boolean tree
    and emitted as *jumping code* (branches to true/false labels) so that
-   `and`/`or`/`not` short-circuit and compile to fused compare-and-branch.
+   `AND`/`OR`/`NOT` short-circuit and compile to fused compare-and-branch.
 
 ## Status and roadmap
 
@@ -181,8 +196,10 @@ v0 is intentionally small but runs real recursive and iterative programs (see
 
 - More types (`bool`, fixed-width ints, pointers, `char`/strings) with a real
   type checker rather than int-everywhere.
-- `for` loops; bitwise operators (`& | ^ ~`, `<<`/`>>`) as value operators,
-  kept distinct from the short-circuit logical `and`/`or`/`not`.
+- `for` loops; bitwise operators as value operators, kept distinct from the
+  short-circuit logical `AND`/`OR`/`NOT`. Their spelling is still open: the
+  usual `| ^ ~` are not on a 1960s teletype, so word forms are the
+  period-accurate choice.
 - Struct / record types and manual memory (stack, arena, or `malloc`/`free`).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.
