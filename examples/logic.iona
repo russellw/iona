@@ -1,0 +1,33 @@
+# Short-circuit logical operators: `and`, `or`, `not`.
+#
+# They are condition-only control-flow words. Each one short-circuits, so a
+# guarded call on the dead side is never evaluated -- `boom` must stay silent.
+
+def boom:
+    "boom: short-circuit failed!" print
+    0 return
+
+def main:
+    5 0 > 5 100 < and if:           # both true
+        "and-true" print
+
+    0 1 > boom 0 > and if:          # left false: boom must be skipped
+        "unreachable" print
+    else:
+        "and-false" print
+
+    0 1 > 7 0 > or if:              # right true
+        "or-true" print
+
+    1 0 > boom 0 > or if:           # left true: boom must be skipped
+        "or-short" print
+
+    1 0 < not if:                   # not false -> true
+        "not-true" print
+
+    50 0 > 50 100 < and not if:     # not (true) -> false
+        "unreachable" print
+    else:
+        "not-false" print
+
+    "done" print

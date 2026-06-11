@@ -82,6 +82,33 @@ i n < while:
     i 1 + i =
 ```
 
+### Logical operators (conditions only)
+
+`and`, `or`, and `not` combine conditions and **short-circuit**: `or` stops at
+the first true operand, `and` at the first false one, and a guarded call on the
+skipped side is never evaluated.
+
+```
+x 0 >  x 100 <  and if:        # 0 < x < 100
+    "in range" print
+
+p 0 ==  p valid  or if:        # `p valid` is not called when p == 0
+    "ok" print
+
+done not while:
+    step
+```
+
+They are control-flow words, not value-producing operators, so they are allowed
+**only** in the condition of an `if` or `while`. They do not double as bitwise
+operators: bitwise `and`/`or`/`xor`/`not` will get their own symbolic spelling
+(`&`, `|`, `^`, `~`) and remain ordinary value operators.
+
+Under the hood a condition is compiled as *jumping code*: instead of computing a
+`0`/`1` and testing it, each part branches straight to a true- or false-label.
+That one mechanism yields both short-circuit evaluation and tight fused
+compare-and-branch output, with no boolean ever materialized in a register.
+
 ### Assignment
 
 Assignment is itself a postfix operator: push a value, push a target name, then
@@ -98,6 +125,7 @@ x 1 + x =      # x = x + 1
 |-------------|------------------------------------------|
 | `+ - * / %` | integer arithmetic                       |
 | `== != < > <= >=` | comparisons (yield `0` / `1`)      |
+| `and or not` | short-circuit logical operators (conditions only) |
 | `x print`   | print an integer or string, then newline |
 | `v return`  | set the function's return value to `v`   |
 | `return`    | set the function's return value to `0`   |
@@ -142,6 +170,9 @@ A function's return value defaults to `0` if `return` is never reached.
 4. **Code generator** — lowers each postfix statement by walking the tokens
    with a *compile-time operand stack* of C expression strings. Function calls
    are materialized into temporaries so evaluation order is well defined.
+   Conditions take a separate path: they are built into a small boolean tree
+   and emitted as *jumping code* (branches to true/false labels) so that
+   `and`/`or`/`not` short-circuit and compile to fused compare-and-branch.
 
 ## Status and roadmap
 
@@ -150,7 +181,8 @@ v0 is intentionally small but runs real recursive and iterative programs (see
 
 - More types (`bool`, fixed-width ints, pointers, `char`/strings) with a real
   type checker rather than int-everywhere.
-- `for` loops and an `and`/`or`/`not` for boolean logic.
+- `for` loops; bitwise operators (`& | ^ ~`, `<<`/`>>`) as value operators,
+  kept distinct from the short-circuit logical `and`/`or`/`not`.
 - Struct / record types and manual memory (stack, arena, or `malloc`/`free`).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.

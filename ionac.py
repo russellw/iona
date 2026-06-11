@@ -36,6 +36,12 @@ class IonaError(Exception):
 # Multi-character operators must be tried before their single-char prefixes.
 OPERATORS = ["<=", ">=", "==", "!=", "<", ">", "=", "+", "-", "*", "/", "%"]
 BINOPS = {"<=", ">=", "==", "!=", "<", ">", "+", "-", "*", "/", "%"}
+COMPARES = {"<=", ">=", "==", "!=", "<", ">"}
+
+# Short-circuit logical connectives. They are condition-only control-flow
+# words (lowered to branches), deliberately *not* value-producing operators --
+# bitwise operators will get their own symbolic spelling.
+LOGICAL = {"and", "or", "not"}
 
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _INT_RE = re.compile(r"[0-9]+")
@@ -197,6 +203,9 @@ class Parser:
         names = [t.value for t in body_toks[1:]]
         if not body_toks[1:] or any(t.kind != "name" for t in body_toks[1:]):
             raise IonaError(line.lineno, "malformed def header: expected `def name params:`")
+        for nm in names:
+            if nm in LOGICAL:
+                raise IonaError(line.lineno, f"`{nm}` is a reserved logical operator and cannot be a name")
         name, params = names[0], names[1:]
         self.i += 1
         body = self.parse_block(line.indent)
@@ -258,6 +267,54 @@ class Value:
         self.type = type   # 'int' | 'str'
 
 
+# --------------------------------------------------------------------------
+# Condition expression tree
+# --------------------------------------------------------------------------
+# A condition is NOT compiled to a 0/1 value. It is built into a small tree
+# (value leaves + relational leaves + and/or/not nodes) by `compile_cond`,
+# then lowered by `gen_cond` as *jumping code*: each piece branches straight to
+# a true-label or false-label. That single mechanism gives both short-circuit
+# evaluation and fused compare-and-branch output, and -- because a leaf's code
+# (including any function call) is only emitted where its branch is reached --
+# calls on a short-circuited path never execute.
+
+class Num:
+    __slots__ = ("text", "lineno")
+    def __init__(self, text, lineno=0): self.text, self.lineno = text, lineno
+
+class StrNode:
+    __slots__ = ("s", "lineno")
+    def __init__(self, s, lineno=0): self.s, self.lineno = s, lineno
+
+class VarNode:
+    __slots__ = ("name", "lineno")
+    def __init__(self, name, lineno=0): self.name, self.lineno = name, lineno
+
+class BinNode:        # arithmetic: a op b
+    __slots__ = ("op", "a", "b", "lineno")
+    def __init__(self, op, a, b, lineno=0): self.op, self.a, self.b, self.lineno = op, a, b, lineno
+
+class CallNode:       # f(args...)
+    __slots__ = ("name", "args", "lineno")
+    def __init__(self, name, args, lineno=0): self.name, self.args, self.lineno = name, args, lineno
+
+class RelNode:        # boolean leaf: a <cmp> b
+    __slots__ = ("op", "a", "b", "lineno")
+    def __init__(self, op, a, b, lineno=0): self.op, self.a, self.b, self.lineno = op, a, b, lineno
+
+class AndNode:
+    __slots__ = ("l", "r", "lineno")
+    def __init__(self, l, r, lineno=0): self.l, self.r, self.lineno = l, r, lineno
+
+class OrNode:
+    __slots__ = ("l", "r", "lineno")
+    def __init__(self, l, r, lineno=0): self.l, self.r, self.lineno = l, r, lineno
+
+class NotNode:
+    __slots__ = ("x", "lineno")
+    def __init__(self, x, lineno=0): self.x, self.lineno = x, lineno
+
+
 class FuncCtx:
     """Per-function code-generation state."""
 
@@ -266,6 +323,7 @@ class FuncCtx:
         self.declared = set(params)
         self.locals = []         # extra locals to hoist (name)
         self.tmp = 0
+        self.lbl = 0
 
     def emit(self, line):
         self.lines.append(line)
@@ -273,6 +331,10 @@ class FuncCtx:
     def new_tmp(self):
         self.tmp += 1
         return f"_t{self.tmp}"
+
+    def new_label(self):
+        self.lbl += 1
+        return f"_L{self.lbl}"
 
 
 class CodeGen:
@@ -321,36 +383,189 @@ class CodeGen:
             # leftover pure expressions are simply discarded
             return
         if isinstance(s, If):
-            cond = self.compile_condition(s.cond, ctx, indent)
-            ctx.emit(f"{pad}if ({cond}) {{")
-            self.gen_body(s.then_body, ctx, indent + 1)
+            # Jumping code: the condition branches to a false-label; the true
+            # case falls through into the then-body.
+            node = self.compile_cond(s.cond)
             if s.else_body is not None:
-                ctx.emit(f"{pad}}} else {{")
+                l_else = ctx.new_label()
+                l_end = ctx.new_label()
+                self.gen_cond(node, ctx, None, l_else, indent)
+                self.gen_body(s.then_body, ctx, indent + 1)
+                ctx.emit(f"{pad}goto {l_end};")
+                ctx.emit(f"{pad}{l_else}: ;")
                 self.gen_body(s.else_body, ctx, indent + 1)
-            ctx.emit(f"{pad}}}")
+                ctx.emit(f"{pad}{l_end}: ;")
+            else:
+                l_end = ctx.new_label()
+                self.gen_cond(node, ctx, None, l_end, indent)
+                self.gen_body(s.then_body, ctx, indent + 1)
+                ctx.emit(f"{pad}{l_end}: ;")
             return
         if isinstance(s, While):
-            # Re-evaluate the condition each iteration: its setup code (e.g. any
-            # call temporaries) must run inside the loop, so we use the
-            # `while (1) { setup; if (!cond) break; body }` shape.
-            ctx.emit(f"{pad}while (1) {{")
-            cond = self.compile_condition(s.cond, ctx, indent + 1)
-            inner = "    " * (indent + 1)
-            ctx.emit(f"{inner}if (!({cond})) break;")
+            # The condition (including any call temporaries it emits) lives
+            # after the top label, so it is re-evaluated every iteration.
+            l_top = ctx.new_label()
+            l_end = ctx.new_label()
+            ctx.emit(f"{pad}{l_top}: ;")
+            node = self.compile_cond(s.cond)
+            self.gen_cond(node, ctx, None, l_end, indent)
             self.gen_body(s.body, ctx, indent + 1)
-            ctx.emit(f"{pad}}}")
+            ctx.emit(f"{pad}goto {l_top};")
+            ctx.emit(f"{pad}{l_end}: ;")
             return
         if isinstance(s, FuncDef):
             raise IonaError(s.lineno, "nested function definitions are not supported")
         raise IonaError(0, f"internal: unknown statement {s!r}")
 
-    def compile_condition(self, tokens, ctx, indent):
+    # ---- conditions: build a boolean tree, then lower it to jumping code ----
+
+    def compile_cond(self, tokens):
+        """Build a boolean expression tree from a postfix condition.
+
+        This is a pure compile-time pass: it emits no code, only assembles
+        nodes on a stack. `and`/`or`/`not` are control-flow words, valid only
+        here; assignment, `print`, and `return` are rejected.
+        """
         stack = []
-        self.compile_tokens(tokens, ctx, stack, indent, allow_effects=False)
+        for t in tokens:
+            if t.kind == "int":
+                stack.append(Num(t.value, t.lineno))
+            elif t.kind == "str":
+                stack.append(StrNode(t.value, t.lineno))
+            elif t.kind == "op":
+                if t.value == "=":
+                    raise IonaError(t.lineno, "assignment is not allowed in a condition")
+                if len(stack) < 2:
+                    raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
+                b = stack.pop()
+                a = stack.pop()
+                if t.value in COMPARES:
+                    stack.append(RelNode(t.value, a, b, t.lineno))
+                else:
+                    stack.append(BinNode(t.value, a, b, t.lineno))
+            elif t.kind == "name":
+                name = t.value
+                if name == "not":
+                    if not stack:
+                        raise IonaError(t.lineno, "`not` needs one operand")
+                    stack.append(NotNode(self.as_bool(stack.pop()), t.lineno))
+                elif name in ("and", "or"):
+                    if len(stack) < 2:
+                        raise IonaError(t.lineno, f"`{name}` needs two operands")
+                    b = self.as_bool(stack.pop())
+                    a = self.as_bool(stack.pop())
+                    cls = AndNode if name == "and" else OrNode
+                    stack.append(cls(a, b, t.lineno))
+                elif name in ("print", "return"):
+                    raise IonaError(t.lineno, f"`{name}` cannot be used in a condition")
+                elif name in self.funcs:
+                    d = self.funcs[name]
+                    arity = len(d.params)
+                    if len(stack) < arity:
+                        raise IonaError(t.lineno, f"`{name}` needs {arity} argument(s)")
+                    args = [stack.pop() for _ in range(arity)][::-1]
+                    stack.append(CallNode(name, args, t.lineno))
+                else:
+                    stack.append(VarNode(name, t.lineno))
+            else:
+                raise IonaError(t.lineno, f"unexpected token {t.value!r}")
         if len(stack) != 1:
             ln = tokens[0].lineno if tokens else 0
             raise IonaError(ln, f"condition must produce exactly one value (got {len(stack)})")
-        return stack[0].expr
+        return self.as_bool(stack[0])
+
+    def as_bool(self, node):
+        """Treat a plain value as a truth test: nonzero is true."""
+        if isinstance(node, (RelNode, AndNode, OrNode, NotNode)):
+            return node
+        return RelNode("!=", node, Num("0", node.lineno), node.lineno)
+
+    def gen_cond(self, node, ctx, t_lbl, f_lbl, indent):
+        """Emit jumping code for a boolean tree.
+
+        Control reaches `t_lbl` when the condition is true and `f_lbl` when it
+        is false. Either label may be `None`, meaning "fall through" -- that is
+        the standard fall-through optimization, and it is what collapses the
+        output down to a tight chain of compare-and-branch instructions.
+        """
+        pad = "    " * indent
+        if isinstance(node, NotNode):
+            self.gen_cond(node.x, ctx, f_lbl, t_lbl, indent)
+            return
+        if isinstance(node, AndNode):
+            # left false => whole false; left true => test right (fall through).
+            after = None
+            lf = f_lbl
+            if lf is None:                 # false must skip past the right operand
+                after = ctx.new_label()
+                lf = after
+            self.gen_cond(node.l, ctx, None, lf, indent)
+            self.gen_cond(node.r, ctx, t_lbl, f_lbl, indent)
+            if after is not None:
+                ctx.emit(f"{pad}{after}: ;")
+            return
+        if isinstance(node, OrNode):
+            # left true => whole true; left false => test right (fall through).
+            after = None
+            lt = t_lbl
+            if lt is None:                 # true must skip past the right operand
+                after = ctx.new_label()
+                lt = after
+            self.gen_cond(node.l, ctx, lt, None, indent)
+            self.gen_cond(node.r, ctx, t_lbl, f_lbl, indent)
+            if after is not None:
+                ctx.emit(f"{pad}{after}: ;")
+            return
+        self.gen_rel(node, ctx, t_lbl, f_lbl, indent)
+
+    def gen_rel(self, node, ctx, t_lbl, f_lbl, indent):
+        pad = "    " * indent
+        a = self.emit_value(node.a, ctx, pad)
+        b = self.emit_value(node.b, ctx, pad)
+        if a.type != "int" or b.type != "int":
+            raise IonaError(node.lineno, f"comparison `{node.op}` requires integers")
+        cmp = f"({a.expr} {node.op} {b.expr})"
+        if t_lbl is not None and f_lbl is not None:
+            ctx.emit(f"{pad}if {cmp} goto {t_lbl};")
+            ctx.emit(f"{pad}goto {f_lbl};")
+        elif t_lbl is not None:            # fall through when false
+            ctx.emit(f"{pad}if {cmp} goto {t_lbl};")
+        elif f_lbl is not None:            # fall through when true
+            ctx.emit(f"{pad}if (!{cmp}) goto {f_lbl};")
+        # both None: nothing to branch on (degenerate)
+
+    def emit_value(self, node, ctx, pad):
+        """Lower a value node to a C expression, emitting any call temporaries.
+
+        Calls are materialized here -- at the point in the jumping code where
+        the branch is actually reached -- so a call guarded by a short-circuit
+        is never evaluated on the path that skips it.
+        """
+        if isinstance(node, Num):
+            return Value(node.text, "int")
+        if isinstance(node, StrNode):
+            return Value(self.c_string(node.s), "str")
+        if isinstance(node, VarNode):
+            return Value(node.name, "int")
+        if isinstance(node, BinNode):
+            a = self.emit_value(node.a, ctx, pad)
+            b = self.emit_value(node.b, ctx, pad)
+            if a.type != "int" or b.type != "int":
+                raise IonaError(node.lineno, f"operator `{node.op}` requires integers")
+            return Value(f"({a.expr} {node.op} {b.expr})", "int")
+        if isinstance(node, RelNode):
+            a = self.emit_value(node.a, ctx, pad)
+            b = self.emit_value(node.b, ctx, pad)
+            if a.type != "int" or b.type != "int":
+                raise IonaError(node.lineno, f"comparison `{node.op}` requires integers")
+            return Value(f"({a.expr} {node.op} {b.expr})", "int")
+        if isinstance(node, CallNode):
+            args = [self.emit_value(a, ctx, pad) for a in node.args]
+            call = f"{node.name}(" + ", ".join(a.expr for a in args) + ")"
+            tmp = ctx.new_tmp()
+            ctx.emit(f"{pad}int {tmp} = {call};")
+            return Value(tmp, "int")
+        raise IonaError(getattr(node, "lineno", 0), "internal: bad value node")
 
     def compile_tokens(self, tokens, ctx, stack, indent, allow_effects):
         pad = "    " * indent
@@ -396,6 +611,8 @@ class CodeGen:
 
     def compile_name(self, t, ctx, stack, pad, allow_effects):
         name = t.value
+        if name in LOGICAL:
+            raise IonaError(t.lineno, f"`{name}` is a logical operator and is only allowed in a condition")
         if name == "print":
             if not allow_effects:
                 raise IonaError(t.lineno, "`print` cannot be used in a condition")
