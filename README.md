@@ -5,8 +5,9 @@ that are not usually found together:
 
 - **A systems language**, like C or Pascal: it compiles directly to machine
   code and has no garbage collector. Values are plain machine words.
-- **Indentation-based block structure**, like Python: `IF`, `WHILE`, and `DEF`
-  open an indented suite, with no `begin`/`end` or braces.
+- **Indentation-based block structure**, like Python but terser: `IF`, `WHILE`,
+  and `DEF` open an indented suite with no `begin`/`end`, braces, or even a
+  trailing colon — the indentation alone delimits the block.
 - **Postfix expressions within a line**, like Forth: operands come before the
   operator, so `3 4 +` means `3 + 4`, and `N FACTORIAL` calls `FACTORIAL(N)`.
   There are no parentheses and no operator-precedence rules to memorize.
@@ -36,13 +37,13 @@ python3 tests/run_tests.py
 A program is a sequence of `DEF` declarations. Execution begins at `MAIN`.
 
 ```
-DEF FACTORIAL N:
-    N 1 <= IF:
+DEF FACTORIAL N
+    N 1 <= IF
         1 RETURN
-    ELSE:
+    ELSE
         N  N 1 - FACTORIAL  *  RETURN
 
-DEF MAIN:
+DEF MAIN
     5 FACTORIAL PRINT     # 120
 ```
 
@@ -75,7 +76,7 @@ Declarations are the one deliberate exception to postfix order, because they
 name a thing rather than compute a value:
 
 ```
-DEF NAME PARAM1 PARAM2:
+DEF NAME PARAM1 PARAM2
     <body>
 ```
 
@@ -86,12 +87,12 @@ All parameters and values are integers in v0.
 The condition is evaluated first and the keyword consumes it:
 
 ```
-N 0 > IF:
+N 0 > IF
     "POSITIVE" PRINT
-ELSE:
+ELSE
     "NOT POSITIVE" PRINT
 
-I N < WHILE:
+I N < WHILE
     I PRINT
     I 1 + I !
 ```
@@ -103,13 +104,13 @@ the first true operand, `AND` at the first false one, and a guarded call on the
 skipped side is never evaluated.
 
 ```
-X 0 >  X 100 <  AND IF:        # 0 < X < 100
+X 0 >  X 100 <  AND IF         # 0 < X < 100
     "IN RANGE" PRINT
 
-P 0 =  P VALID  OR IF:         # `P VALID` is not called when P = 0
+P 0 =  P VALID  OR IF          # `P VALID` is not called when P = 0
     "OK" PRINT
 
-DONE NOT WHILE:
+DONE NOT WHILE
     STEP
 ```
 
@@ -154,7 +155,7 @@ to the end of the function, which is the single point where it actually
 returns. Anything after a `RETURN` still runs:
 
 ```
-DEF READSQUARED X:
+DEF READSQUARED X
     "OPEN FILE" PRINT
     X X * RETURN          # set the result
     "CLOSE FILE" PRINT    # still runs -- cleanup is never skipped

@@ -3,31 +3,31 @@
 # THEY ARE CONDITION-ONLY CONTROL-FLOW WORDS. EACH ONE SHORT-CIRCUITS, SO A
 # GUARDED CALL ON THE DEAD SIDE IS NEVER EVALUATED -- `BOOM` MUST STAY SILENT.
 
-DEF BOOM:
+DEF BOOM
     "BOOM: SHORT-CIRCUIT FAILED!" PRINT
     0 RETURN
 
-DEF MAIN:
-    5 0 > 5 100 < AND IF:           # BOTH TRUE
+DEF MAIN
+    5 0 > 5 100 < AND IF            # BOTH TRUE
         "AND-TRUE" PRINT
 
-    0 1 > BOOM 0 > AND IF:          # LEFT FALSE: BOOM MUST BE SKIPPED
+    0 1 > BOOM 0 > AND IF           # LEFT FALSE: BOOM MUST BE SKIPPED
         "UNREACHABLE" PRINT
-    ELSE:
+    ELSE
         "AND-FALSE" PRINT
 
-    0 1 > 7 0 > OR IF:              # RIGHT TRUE
+    0 1 > 7 0 > OR IF               # RIGHT TRUE
         "OR-TRUE" PRINT
 
-    1 0 > BOOM 0 > OR IF:           # LEFT TRUE: BOOM MUST BE SKIPPED
+    1 0 > BOOM 0 > OR IF            # LEFT TRUE: BOOM MUST BE SKIPPED
         "OR-SHORT" PRINT
 
-    1 0 < NOT IF:                   # NOT FALSE -> TRUE
+    1 0 < NOT IF                    # NOT FALSE -> TRUE
         "NOT-TRUE" PRINT
 
-    50 0 > 50 100 < AND NOT IF:     # NOT (TRUE) -> FALSE
+    50 0 > 50 100 < AND NOT IF      # NOT (TRUE) -> FALSE
         "UNREACHABLE" PRINT
-    ELSE:
+    ELSE
         "NOT-FALSE" PRINT
 
     "DONE" PRINT

@@ -65,7 +65,7 @@ class Token:
     __slots__ = ("kind", "value", "lineno")
 
     def __init__(self, kind, value, lineno):
-        self.kind = kind  # 'int' | 'str' | 'op' | 'name' | 'colon'
+        self.kind = kind  # 'int' | 'str' | 'op' | 'name'
         self.value = value
         self.lineno = lineno
 
@@ -85,10 +85,6 @@ def tokenize_line(text, lineno):
             continue
         if c == "#":
             break  # rest of line is a comment
-        if c == ":":
-            toks.append(Token("colon", ":", lineno))
-            i += 1
-            continue
         if c == '"':
             j = i + 1
             buf = []
@@ -191,7 +187,18 @@ class Stmt:
 # --------------------------------------------------------------------------
 
 def is_header(tokens):
-    return tokens[-1].kind == "colon"
+    """True if the line opens an indented block.
+
+    Blocks have no colon: the keyword alone marks a header (`DEF` leads, `IF`
+    and `WHILE` trail, `ELSE` stands alone) and the indented suite that follows
+    delimits its body.
+    """
+    first, last = tokens[0], tokens[-1]
+    if first.kind == "name" and first.value == "DEF":
+        return True
+    if last.kind == "name" and last.value in ("IF", "WHILE"):
+        return True
+    return len(tokens) == 1 and last.kind == "name" and last.value == "ELSE"
 
 
 class Parser:
@@ -212,11 +219,11 @@ class Parser:
 
     def parse_def(self):
         line = self.lines[self.i]
-        body_toks = line.tokens[:-1]  # drop colon
-        # def name param1 param2 ...
-        names = [t.value for t in body_toks[1:]]
-        if not body_toks[1:] or any(t.kind != "name" for t in body_toks[1:]):
-            raise IonaError(line.lineno, "malformed def header: expected `DEF NAME PARAMS:`")
+        toks = line.tokens
+        # DEF NAME PARAM1 PARAM2 ...
+        names = [t.value for t in toks[1:]]
+        if not toks[1:] or any(t.kind != "name" for t in toks[1:]):
+            raise IonaError(line.lineno, "malformed def header: expected `DEF NAME PARAMS`")
         for nm in names:
             if nm in LOGICAL:
                 raise IonaError(line.lineno, f"`{nm}` is a reserved logical operator and cannot be a name")
@@ -244,27 +251,26 @@ class Parser:
         line = self.lines[self.i]
         toks = line.tokens
         if is_header(toks):
-            head = toks[:-1]  # without colon
-            kw = head[-1].value if head else None
-            if head and head[0].value == "DEF":
+            if toks[0].value == "DEF":
                 return self.parse_def()
+            kw = toks[-1].value          # IF or WHILE; condition is everything before
             if kw == "IF":
                 self.i += 1
                 then_body = self.parse_block(indent)
                 else_body = None
-                # optional `ELSE:` at the same indentation
+                # optional `ELSE` at the same indentation
                 if (self.i < len(self.lines)
                         and self.lines[self.i].indent == indent
                         and is_header(self.lines[self.i].tokens)
                         and self.lines[self.i].tokens[0].value == "ELSE"):
                     self.i += 1
                     else_body = self.parse_block(indent)
-                return If(head[:-1], then_body, else_body, line.lineno)
+                return If(toks[:-1], then_body, else_body, line.lineno)
             if kw == "WHILE":
                 self.i += 1
                 body = self.parse_block(indent)
-                return While(head[:-1], body, line.lineno)
-            raise IonaError(line.lineno, f"unknown block header ending in `{kw}:`")
+                return While(toks[:-1], body, line.lineno)
+            raise IonaError(line.lineno, f"unknown block header ending in `{kw}`")
         self.i += 1
         return Stmt(toks, line.lineno)
 

@@ -1,19 +1,19 @@
 # ITERATIVE FIBONACCI, SHOWING ASSIGNMENT AND A WHILE LOOP.
 # ASSIGNMENT IS POSTFIX TOO: `VALUE NAME !` STORES VALUE INTO NAME.
 
-DEF FIB N:
+DEF FIB N
     0 A !
     1 B !
     0 I !
-    I N < WHILE:
+    I N < WHILE
         A B + T !
         B A !
         T B !
         I 1 + I !
     A RETURN
 
-DEF MAIN:
+DEF MAIN
     0 I !
-    I 10 < WHILE:
+    I 10 < WHILE
         I FIB PRINT
         I 1 + I !
