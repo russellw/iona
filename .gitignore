@@ -1,4 +1,6 @@
 # Iona build artifacts: C emitted next to sources, and compiled executables.
+# `a.out` is the default name for throwaway verification builds; left to lie.
+a.out
 examples/*.c
 tests/*.c
 examples/factorial
