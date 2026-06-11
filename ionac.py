@@ -7,8 +7,8 @@ Iona is an experimental systems language:
     the operator, so `3 4 +` means 3 + 4 and `N FACTORIAL` calls FACTORIAL(N).
   - Compiles directly to machine code (this v0 emits C and hands it to `cc`).
   - No garbage collection: locals are plain machine words.
-  - Source is UPPERCASE with ALGOL-style operators (`=`, `<>`, `:=`), staying
-    within a 1960s teletype's character set.
+  - Source is UPPERCASE with terse operators (`=` equality, `<>` not-equal,
+    `!` assignment), staying within a 1960s teletype's character set.
 
 This file is the whole toolchain for the v0 language: tokenizer, an
 indentation-based block parser, and a code generator that lowers postfix
@@ -35,10 +35,11 @@ class IonaError(Exception):
 # Tokenizer
 # --------------------------------------------------------------------------
 
-# Surface operators, period-accurate ALGOL-style spellings: `=` is equality,
-# `<>` is not-equal, and `:=` is assignment (lexed in the `:` branch below).
+# Surface operators: `=` is equality and `<>` is not-equal (ALGOL-style); `!` is
+# assignment -- a single terse keystroke, handled as assignment in code
+# generation rather than as a value operator.
 # Multi-character operators must be tried before their single-char prefixes.
-OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"]
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "+", "-", "*", "/", "%"]
 BINOPS = {"<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"}
 COMPARES = {"<=", ">=", "<>", "<", ">", "="}
 
@@ -85,10 +86,6 @@ def tokenize_line(text, lineno):
         if c == "#":
             break  # rest of line is a comment
         if c == ":":
-            if text.startswith(":=", i):
-                toks.append(Token("op", ":=", lineno))  # assignment
-                i += 2
-                continue
             toks.append(Token("colon", ":", lineno))
             i += 1
             continue
@@ -456,7 +453,7 @@ class CodeGen:
             elif t.kind == "str":
                 stack.append(StrNode(t.value, t.lineno))
             elif t.kind == "op":
-                if t.value == ":=":
+                if t.value == "!":
                     raise IonaError(t.lineno, "assignment is not allowed in a condition")
                 if len(stack) < 2:
                     raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
@@ -598,7 +595,7 @@ class CodeGen:
             elif t.kind == "str":
                 stack.append(Value(self.c_string(t.value), "str"))
             elif t.kind == "op":
-                if t.value == ":=":
+                if t.value == "!":
                     self.op_assign(t, ctx, stack, pad, allow_effects)
                 else:
                     self.op_binary(t, stack)

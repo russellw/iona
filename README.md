@@ -55,9 +55,9 @@ consequences shape the surface syntax:
 - **Source is UPPERCASE.** That hardware had no lowercase letters at all.
   Identifiers are uppercase letters and digits (no underscore — its code point
   printed a left-arrow on a 1963 machine).
-- **ALGOL-style operators.** Equality is `=`, not-equal is `<>`, and assignment
-  is `:=` — the period-accurate spellings, all typeable on the machine. (The
-  `==`/`!=`/`=` convention is a 1972-era C-ism.)
+- **Terse operators.** Equality is `=` and not-equal is `<>` (ALGOL-style, and
+  the `==`/`!=` convention is a 1972-era C-ism). Assignment is a single `!`.
+  All are typeable on the machine.
 
 ### Lines are postfix token streams
 
@@ -93,7 +93,7 @@ ELSE:
 
 I N < WHILE:
     I PRINT
-    I 1 + I :=
+    I 1 + I !
 ```
 
 ### Logical operators (conditions only)
@@ -126,11 +126,11 @@ compare-and-branch output, with no boolean ever materialized in a register.
 ### Assignment
 
 Assignment is itself a postfix operator: push a value, push a target name, then
-`:=`. Variables are declared automatically on first assignment.
+`!`. Variables are declared automatically on first assignment.
 
 ```
-5 X :=          # X = 5
-X 1 + X :=      # X = X + 1
+5 X !          # X = 5
+X 1 + X !      # X = X + 1
 ```
 
 ### Built-ins
@@ -140,7 +140,7 @@ X 1 + X :=      # X = X + 1
 | `+ - * / %` | integer arithmetic                       |
 | `= <> < > <= >=` | comparisons (yield `0` / `1`)       |
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
-| `VALUE NAME :=` | assign `VALUE` into `NAME`            |
+| `VALUE NAME !` | assign `VALUE` into `NAME`             |
 | `X PRINT`   | print an integer or string, then newline |
 | `V RETURN`  | set the function's return value to `V`   |
 | `RETURN`    | set the function's return value to `0`   |
