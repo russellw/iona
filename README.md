@@ -6,8 +6,9 @@ that are not usually found together:
 - **A systems language**, like C or Pascal: it compiles directly to machine
   code and has no garbage collector. Values are plain machine words.
 - **Indentation-based block structure**, like Python but terser: a `!`-prefixed
-  definition, `IF`, and `WHILE` open an indented suite with no `begin`/`end`,
-  braces, or even a trailing colon — the indentation alone delimits the block.
+  definition, a `?` conditional, and `WHILE` open an indented suite with no
+  `begin`/`end`, braces, or even a trailing colon — the indentation alone
+  delimits the block.
 - **Postfix expressions within a line**, like Forth: operands come before the
   operator, so `3 4 +` means `3 + 4`, and `N FACTORIAL` calls `FACTORIAL(N)`.
   There are no parentheses and no operator-precedence rules to memorize.
@@ -38,7 +39,7 @@ A program is a sequence of `!`-prefixed declarations. Execution begins at `MAIN`
 
 ```
 !FACTORIAL N
-    N 1 <= IF
+    N 1 <= ?
         1 RETURN
     ELSE
         N  N 1 - FACTORIAL  *  RETURN
@@ -88,10 +89,11 @@ integers in v0.
 
 ### Control flow reads postfix
 
-The condition is evaluated first and the keyword consumes it:
+The condition is evaluated first and the trailing marker consumes it — `?` for
+a conditional, `WHILE` for a loop:
 
 ```
-N 0 > IF
+N 0 > ?
     "POSITIVE" PRINT
 ELSE
     "NOT POSITIVE" PRINT
@@ -108,10 +110,10 @@ the first true operand, `AND` at the first false one, and a guarded call on the
 skipped side is never evaluated.
 
 ```
-X 0 >  X 100 <  AND IF         # 0 < X < 100
+X 0 >  X 100 <  AND ?          # 0 < X < 100
     "IN RANGE" PRINT
 
-P 0 =  P VALID  OR IF          # `P VALID` is not called when P = 0
+P 0 =  P VALID  OR ?           # `P VALID` is not called when P = 0
     "OK" PRINT
 
 DONE NOT WHILE
@@ -119,7 +121,7 @@ DONE NOT WHILE
 ```
 
 They are control-flow words, not value-producing operators, so they are allowed
-**only** in the condition of an `IF` or `WHILE`. They do not double as bitwise
+**only** in the condition of a `?` or `WHILE`. They do not double as bitwise
 operators: a future bitwise set will get its own spelling (and since `| ^ ~`
 are not on a 1960s teletype, word forms are the likely choice).
 
@@ -168,7 +170,7 @@ returns. Anything after a `RETURN` still runs:
 ```
 
 A consequence: because `RETURN` no longer skips the rest of the function, use
-`IF`/`ELSE` (not a bare early `RETURN`) when one branch must not run the other.
+`?`/`ELSE` (not a bare early `RETURN`) when one branch must not run the other.
 A function's return value defaults to `0` if `RETURN` is never reached.
 
 ### Literals and comments
@@ -186,7 +188,7 @@ A function's return value defaults to `0` if `RETURN` is never reached.
 1. **Tokenizer** — splits each physical line into postfix tokens.
 2. **Line reader** — measures indentation and drops blank/comment lines.
 3. **Block parser** — turns indentation into a nested AST of `!`-definitions,
-   `IF`, `WHILE`, and statement nodes.
+   `?`-conditionals, `WHILE` loops, and statement nodes.
 4. **Code generator** — lowers each postfix statement by walking the tokens
    with a *compile-time operand stack* of C expression strings. Function calls
    are materialized into temporaries so evaluation order is well defined.

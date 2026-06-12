@@ -1,7 +1,7 @@
-# EXERCISES ARITHMETIC, COMPARISONS, IF/ELSE, AND NESTED CALLS.
+# EXERCISES ARITHMETIC, COMPARISONS, CONDITIONALS, AND NESTED CALLS.
 
 !MAX A B
-    A B < IF
+    A B < ?
         B RETURN
     ELSE
         A RETURN
@@ -12,7 +12,7 @@
     100 9 / PRINT            # 11
     3 8 MAX PRINT            # 8
     8 3 MAX PRINT            # 8
-    5 5 = IF                 # EQUALITY IS `=`
+    5 5 = ?                 # EQUALITY IS `=`
         "EQUAL" PRINT
     ELSE
         "NO" PRINT

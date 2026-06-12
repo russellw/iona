@@ -2,7 +2,7 @@
 # WITHIN A LINE THE SYNTAX IS POSTFIX: `N 1 -` IS N - 1, `N FACTORIAL` CALLS IT.
 
 !FACTORIAL N
-    N 1 <= IF
+    N 1 <= ?
         1 RETURN
     ELSE
         N  N 1 - FACTORIAL  *  RETURN
