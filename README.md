@@ -94,7 +94,7 @@ ELSE
 
 I N < WHILE
     I PRINT
-    I 1 + I !
+    I 1 + I!
 ```
 
 ### Logical operators (conditions only)
@@ -126,12 +126,12 @@ compare-and-branch output, with no boolean ever materialized in a register.
 
 ### Assignment
 
-Assignment is itself a postfix operator: push a value, push a target name, then
-`!`. Variables are declared automatically on first assignment.
+Assignment is itself a postfix operator: push a value, then the target name with
+`!` suffixed. Variables are declared automatically on first assignment.
 
 ```
-5 X !          # X = 5
-X 1 + X !      # X = X + 1
+5 X!           # X = 5
+X 1 + X!       # X = X + 1
 ```
 
 ### Built-ins
@@ -141,7 +141,7 @@ X 1 + X !      # X = X + 1
 | `+ - * / %` | integer arithmetic                       |
 | `= <> < > <= >=` | comparisons (yield `0` / `1`)       |
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
-| `VALUE NAME !` | assign `VALUE` into `NAME`             |
+| `VALUE NAME!` | assign `VALUE` into `NAME`              |
 | `X PRINT`   | print an integer or string, then newline |
 | `V RETURN`  | set the function's return value to `V`   |
 | `RETURN`    | set the function's return value to `0`   |
