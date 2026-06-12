@@ -37,10 +37,11 @@ class IonaError(Exception):
 
 # Surface operators. `=` is equality and `<>` is not-equal (ALGOL-style). `!` is
 # assignment when it trails a name, and the definition marker when it leads a
-# line. `?` is the conditional ("if") marker that trails a condition. These
-# markers are lexed here as `op` tokens; the parser interprets them by position.
+# line. `?` trails a condition to mark a conditional, and `@` trails a value to
+# return it. These markers are lexed here as `op` tokens; the parser and code
+# generator interpret them by position.
 # Multi-character operators must be tried before their single-char prefixes.
-OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "+", "-", "*", "/", "%"]
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "+", "-", "*", "/", "%"]
 BINOPS = {"<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"}
 COMPARES = {"<=", ">=", "<>", "<", ">", "="}
 
@@ -400,9 +401,9 @@ class CodeGen:
     def gen_func(self, d):
         ctx = FuncCtx(d.params)
         self.gen_body(d.body, ctx, indent=1)
-        # `return` only *sets* the result; the function always falls through to
-        # this single exit point, so cleanup code placed after a `return` still
-        # runs (Iona has no destructors). `_ret` defaults to 0.
+        # `@` only *sets* the result; the function always falls through to this
+        # single exit point, so cleanup code placed after a `@` still runs (Iona
+        # has no destructors). `_ret` defaults to 0.
         head = [self.signature(d) + " {"]
         ret_decl = ["    int _ret = 0;"]
         decls = [f"    int {name};" for name in ctx.locals]
@@ -462,7 +463,7 @@ class CodeGen:
 
         This is a pure compile-time pass: it emits no code, only assembles
         nodes on a stack. `AND`/`OR`/`NOT` are control-flow words, valid only
-        here; assignment, `PRINT`, and `RETURN` are rejected.
+        here; assignment, `@` (return), and `PRINT` are rejected.
         """
         stack = []
         for t in tokens:
@@ -473,6 +474,8 @@ class CodeGen:
             elif t.kind == "op":
                 if t.value == "!":
                     raise IonaError(t.lineno, "assignment is not allowed in a condition")
+                if t.value == "@":
+                    raise IonaError(t.lineno, "`@` (return) is not allowed in a condition")
                 if len(stack) < 2:
                     raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
                 b = stack.pop()
@@ -494,8 +497,8 @@ class CodeGen:
                     a = self.as_bool(stack.pop())
                     cls = AndNode if name == "AND" else OrNode
                     stack.append(cls(a, b, t.lineno))
-                elif name in ("PRINT", "RETURN"):
-                    raise IonaError(t.lineno, f"`{name}` cannot be used in a condition")
+                elif name == "PRINT":
+                    raise IonaError(t.lineno, "`PRINT` cannot be used in a condition")
                 elif name in self.funcs:
                     d = self.funcs[name]
                     arity = len(d.params)
@@ -615,6 +618,8 @@ class CodeGen:
             elif t.kind == "op":
                 if t.value == "!":
                     self.op_assign(t, ctx, stack, pad, allow_effects)
+                elif t.value == "@":
+                    self.op_return(t, ctx, stack, pad, allow_effects)
                 else:
                     self.op_binary(t, stack)
             elif t.kind == "name":
@@ -647,6 +652,18 @@ class CodeGen:
             ctx.locals.append(name)
         ctx.emit(f"{pad}{name} = {value.expr};")
 
+    def op_return(self, t, ctx, stack, pad, allow_effects):
+        if not allow_effects:
+            raise IonaError(t.lineno, "`@` (return) is not allowed in this context")
+        # `@` only *sets* the result and keeps executing: any cleanup statements
+        # after it still run before the function actually returns. With no
+        # operand on the stack it returns 0.
+        if stack:
+            v = stack.pop()
+            ctx.emit(f"{pad}_ret = {v.expr};")
+        else:
+            ctx.emit(f"{pad}_ret = 0;")
+
     def compile_name(self, t, ctx, stack, pad, allow_effects):
         name = t.value
         if name in LOGICAL:
@@ -659,17 +676,6 @@ class CodeGen:
             v = stack.pop()
             fmt = "%s" if v.type == "str" else "%d"
             ctx.emit(f'{pad}printf("{fmt}\\n", {v.expr});')
-            return
-        if name == "RETURN":
-            if not allow_effects:
-                raise IonaError(t.lineno, "`RETURN` cannot be used in a condition")
-            # Set the return value but keep executing: any cleanup statements
-            # after this point still run before the function actually returns.
-            if stack:
-                v = stack.pop()
-                ctx.emit(f"{pad}_ret = {v.expr};")
-            else:
-                ctx.emit(f"{pad}_ret = 0;")
             return
         if name in self.funcs:
             d = self.funcs[name]

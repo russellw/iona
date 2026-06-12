@@ -3,9 +3,9 @@
 
 !FACTORIAL N
     N 1 <= ?
-        1 RETURN
+        1 @
     ELSE
-        N  N 1 - FACTORIAL  *  RETURN
+        N  N 1 - FACTORIAL  *  @
 
 !MAIN
     5 FACTORIAL PRINT     ; 120

@@ -40,9 +40,9 @@ A program is a sequence of `!`-prefixed declarations. Execution begins at `MAIN`
 ```
 !FACTORIAL N
     N 1 <= ?
-        1 RETURN
+        1 @
     ELSE
-        N  N 1 - FACTORIAL  *  RETURN
+        N  N 1 - FACTORIAL  *  @
 
 !MAIN
     5 FACTORIAL PRINT     ; 120
@@ -149,29 +149,29 @@ X 1 + X!       ; X = X + 1
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
 | `VALUE NAME!` | assign `VALUE` into `NAME`              |
 | `X PRINT`   | print an integer or string, then newline |
-| `V RETURN`  | set the function's return value to `V`   |
-| `RETURN`    | set the function's return value to `0`   |
+| `V @`       | set the function's return value to `V`    |
+| `@`         | set the function's return value to `0`    |
 
 ### Return values and cleanup
 
 Iona has no destructors, so cleanup code (closing files, freeing buffers) must
-run explicitly. To make sure it always gets a chance, **`RETURN` does not exit
-the function** — it only *sets* the value to be returned. Execution continues
-to the end of the function, which is the single point where it actually
-returns. Anything after a `RETURN` still runs:
+run explicitly. To make sure it always gets a chance, **`@` does not exit the
+function** — it only *sets* the value to be returned. Execution continues to
+the end of the function, which is the single point where it actually returns.
+Anything after a `@` still runs:
 
 ```
 !READSQUARED X
     "OPEN FILE" PRINT
-    X X * RETURN          ; set the result
+    X X * @               ; set the result
     "CLOSE FILE" PRINT    ; still runs -- cleanup is never skipped
 
 ; prints: OPEN FILE / CLOSE FILE / then MAIN prints 25 for READSQUARED(5)
 ```
 
-A consequence: because `RETURN` no longer skips the rest of the function, use
-`?`/`ELSE` (not a bare early `RETURN`) when one branch must not run the other.
-A function's return value defaults to `0` if `RETURN` is never reached.
+A consequence: because `@` no longer skips the rest of the function, use
+`?`/`ELSE` (not a bare early `@`) when one branch must not run the other.
+A function's return value defaults to `0` if `@` is never reached.
 
 ### Literals and comments
 

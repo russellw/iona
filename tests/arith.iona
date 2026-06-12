@@ -2,9 +2,9 @@
 
 !MAX A B
     A B < ?
-        B RETURN
+        B @
     ELSE
-        A RETURN
+        A @
 
 !MAIN
     2 3 4 * + PRINT          ; 2 + (3*4) = 14

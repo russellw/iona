@@ -5,7 +5,7 @@
 
 !BOOM
     "BOOM: SHORT-CIRCUIT FAILED!" PRINT
-    0 RETURN
+    0 @
 
 !MAIN
     5 0 > 5 100 < AND ?            ; BOTH TRUE

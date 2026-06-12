@@ -10,7 +10,7 @@
         B A!
         T B!
         I 1 + I!
-    A RETURN
+    A @
 
 !MAIN
     0 I!
