@@ -75,7 +75,7 @@ class Token:
 
 
 def tokenize_line(text, lineno):
-    """Tokenize one physical line (comments already implied by `#`)."""
+    """Tokenize one physical line (a `;` begins a comment to end of line)."""
     toks = []
     i = 0
     n = len(text)
@@ -84,7 +84,7 @@ def tokenize_line(text, lineno):
         if c in " \t":
             i += 1
             continue
-        if c == "#":
+        if c == ";":
             break  # rest of line is a comment
         if c == '"':
             j = i + 1

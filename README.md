@@ -45,7 +45,7 @@ A program is a sequence of `!`-prefixed declarations. Execution begins at `MAIN`
         N  N 1 - FACTORIAL  *  RETURN
 
 !MAIN
-    5 FACTORIAL PRINT     # 120
+    5 FACTORIAL PRINT     ; 120
 ```
 
 ### A historical character set
@@ -110,10 +110,10 @@ the first true operand, `AND` at the first false one, and a guarded call on the
 skipped side is never evaluated.
 
 ```
-X 0 >  X 100 <  AND ?          # 0 < X < 100
+X 0 >  X 100 <  AND ?          ; 0 < X < 100
     "IN RANGE" PRINT
 
-P 0 =  P VALID  OR ?           # `P VALID` is not called when P = 0
+P 0 =  P VALID  OR ?           ; `P VALID` is not called when P = 0
     "OK" PRINT
 
 DONE NOT WHILE
@@ -136,8 +136,8 @@ Assignment is itself a postfix operator: push a value, then the target name with
 `!` suffixed. Variables are declared automatically on first assignment.
 
 ```
-5 X!           # X = 5
-X 1 + X!       # X = X + 1
+5 X!           ; X = 5
+X 1 + X!       ; X = X + 1
 ```
 
 ### Built-ins
@@ -163,10 +163,10 @@ returns. Anything after a `RETURN` still runs:
 ```
 !READSQUARED X
     "OPEN FILE" PRINT
-    X X * RETURN          # set the result
-    "CLOSE FILE" PRINT    # still runs -- cleanup is never skipped
+    X X * RETURN          ; set the result
+    "CLOSE FILE" PRINT    ; still runs -- cleanup is never skipped
 
-# prints: OPEN FILE / CLOSE FILE / then MAIN prints 25 for READSQUARED(5)
+; prints: OPEN FILE / CLOSE FILE / then MAIN prints 25 for READSQUARED(5)
 ```
 
 A consequence: because `RETURN` no longer skips the rest of the function, use
@@ -178,7 +178,7 @@ A function's return value defaults to `0` if `RETURN` is never reached.
 - Integer literals: `0`, `42`, `3628800`.
 - String literals: `"HELLO"` (usable as a `PRINT` argument), with `\n`, `\t`,
   `\"`, `\\` escapes.
-- Comments run from `#` to end of line.
+- Comments run from `;` to end of line.
 - Indentation uses spaces; tabs are rejected.
 
 ## How it works
