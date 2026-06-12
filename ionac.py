@@ -186,16 +186,25 @@ class Stmt:
 # Block parser
 # --------------------------------------------------------------------------
 
+def is_def(tokens):
+    """A definition header: `!` prefixed to the function name, e.g. `!FIB N`.
+
+    The prefix `!` is always line-initial, so it never collides with the
+    postfix `!` of assignment (`VALUE NAME!`), which always follows its operands.
+    """
+    return tokens[0].kind == "op" and tokens[0].value == "!"
+
+
 def is_header(tokens):
     """True if the line opens an indented block.
 
-    Blocks have no colon: the keyword alone marks a header (`DEF` leads, `IF`
-    and `WHILE` trail, `ELSE` stands alone) and the indented suite that follows
-    delimits its body.
+    Headers carry no colon -- a marker is enough, and the indented suite that
+    follows delimits the body: `!` leads a definition, `IF`/`WHILE` trail a
+    condition, and `ELSE` stands alone.
     """
-    first, last = tokens[0], tokens[-1]
-    if first.kind == "name" and first.value == "DEF":
+    if is_def(tokens):
         return True
+    last = tokens[-1]
     if last.kind == "name" and last.value in ("IF", "WHILE"):
         return True
     return len(tokens) == 1 and last.kind == "name" and last.value == "ELSE"
@@ -212,18 +221,18 @@ class Parser:
             line = self.lines[self.i]
             if line.indent != 0:
                 raise IonaError(line.lineno, "unexpected indentation at top level")
-            if not (is_header(line.tokens) and line.tokens[0].value == "DEF"):
-                raise IonaError(line.lineno, "only `DEF` declarations are allowed at top level")
+            if not is_def(line.tokens):
+                raise IonaError(line.lineno, "only `!NAME ...` declarations are allowed at top level")
             defs.append(self.parse_def())
         return defs
 
     def parse_def(self):
         line = self.lines[self.i]
         toks = line.tokens
-        # DEF NAME PARAM1 PARAM2 ...
+        # !NAME PARAM1 PARAM2 ...   (toks[0] is the `!` marker)
         names = [t.value for t in toks[1:]]
         if not toks[1:] or any(t.kind != "name" for t in toks[1:]):
-            raise IonaError(line.lineno, "malformed def header: expected `DEF NAME PARAMS`")
+            raise IonaError(line.lineno, "malformed declaration: expected `!NAME PARAMS`")
         for nm in names:
             if nm in LOGICAL:
                 raise IonaError(line.lineno, f"`{nm}` is a reserved logical operator and cannot be a name")
@@ -251,7 +260,7 @@ class Parser:
         line = self.lines[self.i]
         toks = line.tokens
         if is_header(toks):
-            if toks[0].value == "DEF":
+            if is_def(toks):
                 return self.parse_def()
             kw = toks[-1].value          # IF or WHILE; condition is everything before
             if kw == "IF":
