@@ -13,7 +13,7 @@
 
     0 1 > BOOM 0 > AND ?           ; LEFT FALSE: BOOM MUST BE SKIPPED
         "UNREACHABLE" PRINT
-    ELSE
+    /
         "AND-FALSE" PRINT
 
     0 1 > 7 0 > OR ?               ; RIGHT TRUE
@@ -27,7 +27,7 @@
 
     50 0 > 50 100 < AND NOT ?      ; NOT (TRUE) -> FALSE
         "UNREACHABLE" PRINT
-    ELSE
+    /
         "NOT-FALSE" PRINT
 
     "DONE" PRINT

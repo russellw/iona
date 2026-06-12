@@ -4,7 +4,7 @@
 !FACTORIAL N
     N 1 <= ?
         1 @
-    ELSE
+    /
         N  N 1 - FACTORIAL  *  @
 
 !MAIN

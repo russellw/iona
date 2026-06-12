@@ -197,12 +197,22 @@ def is_def(tokens):
     return tokens[0].kind == "op" and tokens[0].value == "!"
 
 
+def is_else(tokens):
+    """The else branch: a line that is just `/`.
+
+    A lone `/` is never a valid statement (division needs two operands), so it
+    is unambiguous as the else marker even though `/` is also the division
+    operator when it sits between operands inside an expression.
+    """
+    return len(tokens) == 1 and tokens[0].kind == "op" and tokens[0].value == "/"
+
+
 def is_header(tokens):
     """True if the line opens an indented block.
 
     Headers carry no colon -- a marker is enough, and the indented suite that
     follows delimits the body: `!` leads a definition, `?` and `WHILE` trail a
-    condition, and `ELSE` stands alone.
+    condition, and a lone `/` is the else branch.
     """
     if is_def(tokens):
         return True
@@ -211,7 +221,7 @@ def is_header(tokens):
         return True
     if last.kind == "name" and last.value == "WHILE":
         return True
-    return len(tokens) == 1 and last.kind == "name" and last.value == "ELSE"
+    return is_else(tokens)
 
 
 class Parser:
@@ -271,11 +281,10 @@ class Parser:
                 self.i += 1
                 then_body = self.parse_block(indent)
                 else_body = None
-                # optional `ELSE` at the same indentation
+                # optional `/` (else) at the same indentation
                 if (self.i < len(self.lines)
                         and self.lines[self.i].indent == indent
-                        and is_header(self.lines[self.i].tokens)
-                        and self.lines[self.i].tokens[0].value == "ELSE"):
+                        and is_else(self.lines[self.i].tokens)):
                     self.i += 1
                     else_body = self.parse_block(indent)
                 return If(toks[:-1], then_body, else_body, line.lineno)

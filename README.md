@@ -41,7 +41,7 @@ A program is a sequence of `!`-prefixed declarations. Execution begins at `MAIN`
 !FACTORIAL N
     N 1 <= ?
         1 @
-    ELSE
+    /
         N  N 1 - FACTORIAL  *  @
 
 !MAIN
@@ -90,12 +90,12 @@ integers in v0.
 ### Control flow reads postfix
 
 The condition is evaluated first and the trailing marker consumes it — `?` for
-a conditional, `WHILE` for a loop:
+a conditional, `WHILE` for a loop. A lone `/` on its own line is the else branch:
 
 ```
 N 0 > ?
     "POSITIVE" PRINT
-ELSE
+/
     "NOT POSITIVE" PRINT
 
 I N < WHILE
@@ -169,9 +169,9 @@ Anything after a `@` still runs:
 ; prints: OPEN FILE / CLOSE FILE / then MAIN prints 25 for READSQUARED(5)
 ```
 
-A consequence: because `@` no longer skips the rest of the function, use
-`?`/`ELSE` (not a bare early `@`) when one branch must not run the other.
-A function's return value defaults to `0` if `@` is never reached.
+A consequence: because `@` no longer skips the rest of the function, use a `?`
+with its `/` else branch (not a bare early `@`) when one branch must not run the
+other. A function's return value defaults to `0` if `@` is never reached.
 
 ### Literals and comments
 
