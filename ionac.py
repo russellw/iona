@@ -37,11 +37,11 @@ class IonaError(Exception):
 
 # Surface operators. `=` is equality and `<>` is not-equal (ALGOL-style). `!` is
 # assignment when it trails a name, and the definition marker when it leads a
-# line. `?` trails a condition to mark a conditional, and `@` trails a value to
-# return it. These markers are lexed here as `op` tokens; the parser and code
-# generator interpret them by position.
+# line. `?` trails a condition to mark a conditional, `&` trails one to mark a
+# while loop, and `@` trails a value to return it. These markers are lexed here
+# as `op` tokens; the parser and code generator interpret them by position.
 # Multi-character operators must be tried before their single-char prefixes.
-OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "+", "-", "*", "/", "%"]
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "&", "+", "-", "*", "/", "%"]
 BINOPS = {"<=", ">=", "<>", "<", ">", "=", "+", "-", "*", "/", "%"}
 COMPARES = {"<=", ">=", "<>", "<", ">", "="}
 
@@ -211,15 +211,13 @@ def is_header(tokens):
     """True if the line opens an indented block.
 
     Headers carry no colon -- a marker is enough, and the indented suite that
-    follows delimits the body: `!` leads a definition, `?` and `WHILE` trail a
-    condition, and a lone `/` is the else branch.
+    follows delimits the body: `!` leads a definition, `?` and `&` trail a
+    condition (conditional and while loop), and a lone `/` is the else branch.
     """
     if is_def(tokens):
         return True
     last = tokens[-1]
-    if last.kind == "op" and last.value == "?":
-        return True
-    if last.kind == "name" and last.value == "WHILE":
+    if last.kind == "op" and last.value in ("?", "&"):
         return True
     return is_else(tokens)
 
@@ -276,7 +274,7 @@ class Parser:
         if is_header(toks):
             if is_def(toks):
                 return self.parse_def()
-            kw = toks[-1].value          # `?` (if) or WHILE; condition is everything before
+            kw = toks[-1].value          # `?` (if) or `&` (while); condition is everything before
             if kw == "?":
                 self.i += 1
                 then_body = self.parse_block(indent)
@@ -288,7 +286,7 @@ class Parser:
                     self.i += 1
                     else_body = self.parse_block(indent)
                 return If(toks[:-1], then_body, else_body, line.lineno)
-            if kw == "WHILE":
+            if kw == "&":
                 self.i += 1
                 body = self.parse_block(indent)
                 return While(toks[:-1], body, line.lineno)
