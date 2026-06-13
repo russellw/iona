@@ -1,0 +1,17 @@
+; ARRAYS: FIXED-SIZE, VALUE TYPES (NO DECAY TO POINTERS).
+; THE SUBSCRIPT IS POSTFIX: `BUF I [` IS BUF[I], USABLE FOR READING OR WRITING.
+
+!MAIN W
+    !BUF A 3 W
+    !I W
+    !SUM W
+    0 I!
+    I 3 < &
+        I 10 *  BUF I [ !      ; BUF[I] = I * 10
+        I 1 + I!
+    0 SUM!
+    0 I!
+    I 3 < &
+        BUF I [  SUM +  SUM!   ; SUM = SUM + BUF[I]
+        I 1 + I!
+    SUM PRINT                  ; 0 + 10 + 20 = 30

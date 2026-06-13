@@ -83,18 +83,57 @@ defaults — and the type follows the name. The scalar types are one letter each
 | `W`  | word (the natural machine integer) | `size_t` |
 | `F`  | float   | `double` |
 
-A pointer is `$` prefixed to a type, and type expressions read **prefix /
-outside-in**, the way you say them:
+The compound types are an **array** `A <count> <type>` (a fixed, compile-time
+size that does **not** decay to a pointer) and a **record** (a struct, defined
+with `!R`, below). A **pointer** is `$` prefixed to a type. Type expressions
+read **prefix / outside-in**, the way you say them:
 
 ```
 $W            pointer to word
 $$B           pointer to pointer to byte
+A 10 W        array of 10 words
+A 10 $W       array of 10 pointers-to-word
 $POINT        pointer to record POINT
 ```
 
-A string literal has type `$B` (pointer to byte). *(Records `R` and arrays `A`
-are reserved in the grammar but not implemented yet — they arrive with the
-field- and index-access operators.)*
+A string literal has type `$B` (pointer to byte). Arrays and records are
+**value types**: assigning, passing, or returning one copies the whole thing.
+
+### Records
+
+A record is defined with `!R NAME` and an indented suite of `FIELD TYPE` lines.
+A field is read or written with `.FIELD` (postfix):
+
+```
+!R POINT
+    X W
+    Y W
+
+!MANHATTAN W, P POINT       ; takes a POINT by value
+    P.X  P.Y  +  @          ; read fields
+
+!MAIN W
+    !P POINT
+    3 P.X!                  ; write a field
+    4 P.Y!
+    P MANHATTAN PRINT       ; 7
+```
+
+### Arrays
+
+An array has a fixed compile-time size and is subscripted with the postfix `[`
+operator: `BUF I [` is `BUF[I]`, usable for reading or as an assignment target.
+There is no decay and no bounds check.
+
+```
+!MAIN W
+    !BUF A 3 W
+    10 BUF 0 [ !            ; BUF[0] = 10
+    BUF 0 [ PRINT           ; read BUF[0]
+```
+
+Access chains freely — `B.CELLS I [`, `B.CORNER.X`, `PTS I [ .Y` — and nested
+aggregates (a record with an array field, an array of records) work too.
 
 ### Definitions
 
@@ -180,8 +219,10 @@ short-circuit evaluation and tight fused compare-and-branch output.
 | `+ - * / %` | arithmetic on two operands of the same numeric type (`%` not on `F`) |
 | `= <> < > <= >=` | comparisons of two same-typed operands (yield `W`, `0`/`1`) |
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
+| `REC.FIELD` | read/write a record field |
+| `ARR I [` | subscript an array (postfix): `ARR[I]` |
 | `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
-| `VALUE NAME!` | assign `VALUE` into `NAME` (types must match) |
+| `VALUE TARGET!` | assign into a variable, field, or element (types must match) |
 | `X PRINT` | print a `B`, `W`, `F`, or string value, then a newline |
 | `V @` | set the function's result to `V` (its type must match the return type) |
 | `@` | in a `V` (void) function, the valueless return marker |
@@ -222,7 +263,7 @@ other. A non-void function's result defaults to `0` if no `@` is reached.
 1. **Tokenizer** — splits each physical line into postfix tokens.
 2. **Line reader** — measures indentation and drops blank/comment lines.
 3. **Block parser** — turns indentation into a nested AST of `!`-definitions,
-   typed locals, `?`-conditionals, `&` loops, and statement nodes.
+   `!R` records, typed locals, `?`-conditionals, `&` loops, and statement nodes.
 4. **Code generator** — type-checks while lowering each postfix statement,
    walking the tokens with a *compile-time operand stack* of typed C
    expressions. Function calls are materialized into temporaries so evaluation
@@ -233,12 +274,12 @@ other. A non-void function's result defaults to `0` if no `@` is reached.
 
 ## Status and roadmap
 
-v0 runs real recursive and iterative programs and statically type-checks them
-(see `examples/` and `tests/`). Natural next steps:
+v0 runs real recursive and iterative programs, statically type-checks them, and
+supports records and arrays with value semantics (see `examples/` and `tests/`).
+Natural next steps:
 
-- **Records (`R`) and arrays (`A`)** with their access operators: field `.`,
-  index `[ ]`, and pointer dereference / address-of. Arrays are value types and
-  do **not** decay to pointers. (The type grammar already reserves `R`/`A`/`$`.)
+- **Pointer operations** — dereference and address-of — to make the `$T` types
+  usable (linked structures, by-reference passing of large aggregates).
 - `for` loops; bitwise operators as value operators, kept distinct from the
   short-circuit logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s
   teletype, word forms are the period-accurate choice).

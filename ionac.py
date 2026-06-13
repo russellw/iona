@@ -44,8 +44,10 @@ class IonaError(Exception):
 # line. `?`/`&` trail a condition (conditional / while loop), `@` trails a value
 # to return it, and `$` prefixes a type to mean "pointer to". These markers are
 # lexed as `op` tokens; the parser interprets them by position.
-# Multi-character operators must be tried before their single-char prefixes.
-OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "&", "$",
+# `.F` accesses field F of a record; `[` is the postfix array subscript
+# (`BUF I [` is BUF[I]). Multi-character operators are tried before their
+# single-char prefixes.
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "&", "$", "[",
              "+", "-", "*", "/", "%"]
 COMPARES = {"<=", ">=", "<>", "<", ">", "="}
 
@@ -66,7 +68,7 @@ class Token:
     __slots__ = ("kind", "value", "lineno")
 
     def __init__(self, kind, value, lineno):
-        self.kind = kind  # 'int' | 'float' | 'str' | 'op' | 'name' | 'comma'
+        self.kind = kind  # 'int'|'float'|'str'|'op'|'name'|'comma'|'field'
         self.value = value
         self.lineno = lineno
 
@@ -89,6 +91,13 @@ def tokenize_line(text, lineno):
         if c == ",":
             toks.append(Token("comma", ",", lineno))
             i += 1
+            continue
+        if c == ".":                    # `.FIELD` record-field accessor
+            m = _NAME_RE.match(text, i + 1)
+            if not m:
+                raise IonaError(lineno, "expected a field name after `.`")
+            toks.append(Token("field", m.group(), lineno))
+            i = m.end()
             continue
         if c == '"':
             j = i + 1
@@ -198,6 +207,39 @@ class Ptr:
         return "$" + self.e.iname()
 
 
+class Array:
+    __slots__ = ("n", "e")
+
+    def __init__(self, n, e):
+        self.n = n                      # element count (compile-time constant)
+        self.e = e                      # element Type
+
+    def __eq__(self, o):
+        return isinstance(o, Array) and o.n == self.n and o.e == self.e
+
+    def __hash__(self):
+        return hash(("A", self.n, self.e))
+
+    def iname(self):
+        return f"A {self.n} {self.e.iname()}"
+
+
+class Record:
+    __slots__ = ("name",)               # fields live in CodeGen.records by name
+
+    def __init__(self, name):
+        self.name = name
+
+    def __eq__(self, o):
+        return isinstance(o, Record) and o.name == self.name
+
+    def __hash__(self):
+        return hash(("R", self.name))
+
+    def iname(self):
+        return self.name
+
+
 VOID = Scalar("V")
 BYTE = Scalar("B")
 WORD = Scalar("W")
@@ -215,43 +257,50 @@ CONVERSIONS = {
 }
 
 
-def ctype(t):
-    """The C type for an Iona type."""
-    if isinstance(t, Scalar):
-        return {"V": "void", "B": "char", "W": "size_t", "F": "double"}[t.k]
-    if isinstance(t, Ptr):
-        return ctype(t.e) + "*"
-    raise IonaError(0, "internal: no C type for this type")
+def is_aggregate(t):
+    return isinstance(t, (Array, Record))
 
 
 def zero_init(t):
     """A C zero-initializer for a declaration of this type."""
-    return "0"
+    return "{0}" if is_aggregate(t) else "0"
 
 
-def parse_type_expr(toks, lineno):
-    """Parse a prefix type expression that must occupy all of `toks`."""
-    ty, i = _parse_type(toks, 0, lineno)
+def parse_type_expr(toks, lineno, records):
+    """Parse a prefix type expression that must occupy all of `toks`.
+
+    `records` is the set of known record names (so a bare name can resolve to a
+    record type). Type expressions read outside-in: `$W`, `A 10 W`, `$A 10 W`.
+    """
+    ty, i = _parse_type(toks, 0, lineno, records)
     if i != len(toks):
         raise IonaError(lineno, "trailing tokens after a type")
     return ty
 
 
-def _parse_type(toks, i, lineno):
+def _parse_type(toks, i, lineno, records):
     if i >= len(toks):
         raise IonaError(lineno, "expected a type")
     t = toks[i]
     if t.kind == "op" and t.value == "$":
-        elem, j = _parse_type(toks, i + 1, lineno)
+        elem, j = _parse_type(toks, i + 1, lineno, records)
         return Ptr(elem), j
     if t.kind == "name":
         v = t.value
         if v in SCALARS:
             return SCALARS[v], i + 1
         if v == "A":
-            raise IonaError(lineno, "array types are not implemented yet (coming with indexing)")
+            if i + 1 >= len(toks) or toks[i + 1].kind != "int":
+                raise IonaError(lineno, "array type needs a size: `A <count> <type>`")
+            n = int(toks[i + 1].value)
+            if n <= 0:
+                raise IonaError(lineno, "array size must be positive")
+            elem, j = _parse_type(toks, i + 2, lineno, records)
+            return Array(n, elem), j
+        if v in records:
+            return Record(v), i + 1
         if v == "R":
-            raise IonaError(lineno, "record types are not implemented yet (coming with field access)")
+            raise IonaError(lineno, "use the record's name as a type, not `R`")
         raise IonaError(lineno, f"unknown type `{v}`")
     raise IonaError(lineno, f"expected a type, found `{t.value}`")
 
@@ -266,6 +315,13 @@ class FuncDef:
         self.ret = ret                  # Type
         self.params = params            # list of (name, Type)
         self.body = body
+        self.lineno = lineno
+
+
+class RecordDef:
+    def __init__(self, name, fields, lineno):
+        self.name = name
+        self.fields = fields            # list of (field_name, Type)
         self.lineno = lineno
 
 
@@ -341,6 +397,17 @@ class Parser:
     def __init__(self, lines):
         self.lines = lines
         self.i = 0
+        self.records = self._prescan_records()
+
+    def _prescan_records(self):
+        """Collect record names first, so types can reference them (and forward)."""
+        names = set()
+        for line in self.lines:
+            t = line.tokens
+            if line.indent == 0 and is_def(t) and len(t) >= 3 \
+                    and t[1].kind == "name" and t[1].value == "R" and t[2].kind == "name":
+                names.add(t[2].value)
+        return names
 
     def parse_module(self):
         defs = []
@@ -359,7 +426,7 @@ class Parser:
         if not body_toks:
             raise IonaError(line.lineno, "malformed declaration")
         if body_toks[0].kind == "name" and body_toks[0].value == "R":
-            raise IonaError(line.lineno, "record types are not implemented yet (coming with field access)")
+            return self.parse_record()
         groups = split_groups(body_toks, line.lineno)
         head = groups[0]
         fname = head[0]
@@ -367,7 +434,7 @@ class Parser:
             raise IonaError(line.lineno, "expected a function name")
         if fname.value in LOGICAL:
             raise IonaError(line.lineno, f"`{fname.value}` is reserved and cannot be a name")
-        ret = parse_type_expr(head[1:], line.lineno)   # no default: required
+        ret = parse_type_expr(head[1:], line.lineno, self.records)   # required
         params = []
         for g in groups[1:]:
             pname = g[0]
@@ -375,10 +442,37 @@ class Parser:
                 raise IonaError(line.lineno, "expected a parameter name")
             if pname.value in LOGICAL:
                 raise IonaError(line.lineno, f"`{pname.value}` is reserved and cannot be a name")
-            params.append((pname.value, parse_type_expr(g[1:], line.lineno)))
+            params.append((pname.value, parse_type_expr(g[1:], line.lineno, self.records)))
         self.i += 1
         body = self.parse_block(line.indent)
         return FuncDef(fname.value, ret, params, body, line.lineno)
+
+    def parse_record(self):
+        """`!R NAME` followed by an indented suite of `FIELD TYPE` lines."""
+        line = self.lines[self.i]
+        bt = line.tokens[1:]            # [R, NAME]
+        if len(bt) != 2 or bt[1].kind != "name":
+            raise IonaError(line.lineno, "malformed record header: expected `!R NAME`")
+        name = bt[1].value
+        self.i += 1
+        if self.i >= len(self.lines) or self.lines[self.i].indent <= line.indent:
+            raise IonaError(line.lineno, "a record needs at least one field")
+        field_indent = self.lines[self.i].indent
+        fields = []
+        seen = set()
+        while self.i < len(self.lines) and self.lines[self.i].indent >= field_indent:
+            fl = self.lines[self.i]
+            if fl.indent != field_indent:
+                raise IonaError(fl.lineno, "inconsistent indentation")
+            ft = fl.tokens
+            if ft[0].kind != "name" or len(ft) < 2:
+                raise IonaError(fl.lineno, "malformed field: expected `NAME TYPE`")
+            if ft[0].value in seen:
+                raise IonaError(fl.lineno, f"duplicate field `{ft[0].value}`")
+            seen.add(ft[0].value)
+            fields.append((ft[0].value, parse_type_expr(ft[1:], fl.lineno, self.records)))
+            self.i += 1
+        return RecordDef(name, fields, line.lineno)
 
     def parse_decl(self):
         """A local declaration inside a body: `!NAME TYPE`."""
@@ -391,7 +485,7 @@ class Parser:
         name = body_toks[0].value
         if name in LOGICAL:
             raise IonaError(line.lineno, f"`{name}` is reserved and cannot be a name")
-        ty = parse_type_expr(body_toks[1:], line.lineno)
+        ty = parse_type_expr(body_toks[1:], line.lineno, self.records)
         self.i += 1
         return Decl(name, ty, line.lineno)
 
@@ -442,11 +536,12 @@ class Parser:
 # --------------------------------------------------------------------------
 
 class Value:
-    __slots__ = ("expr", "type")
+    __slots__ = ("expr", "type", "lvalue")
 
-    def __init__(self, expr, type):
-        self.expr = expr   # a C expression string
-        self.type = type   # an Iona Type
+    def __init__(self, expr, type, lvalue=False):
+        self.expr = expr      # a C expression string
+        self.type = type      # an Iona Type
+        self.lvalue = lvalue  # True if assignable (a variable, field, or element)
 
 
 # Condition expression tree (see gen_cond): conditions compile to jumping code.
@@ -478,6 +573,14 @@ class ConvNode:       # explicit conversion: arg NAME  (e.g. X W2F)
 class CallNode:       # f(args...)
     __slots__ = ("name", "args", "lineno")
     def __init__(self, name, args, lineno=0): self.name, self.args, self.lineno = name, args, lineno
+
+class FieldNode:      # record field access: rec.field
+    __slots__ = ("rec", "field", "lineno")
+    def __init__(self, rec, field, lineno=0): self.rec, self.field, self.lineno = rec, field, lineno
+
+class IndexNode:      # array subscript: arr[idx]
+    __slots__ = ("arr", "idx", "lineno")
+    def __init__(self, arr, idx, lineno=0): self.arr, self.idx, self.lineno = arr, idx, lineno
 
 class RelNode:        # boolean leaf: a <cmp> b
     __slots__ = ("op", "a", "b", "lineno")
@@ -539,17 +642,116 @@ class FuncCtx:
 class CodeGen:
     def __init__(self, defs):
         self.defs = defs
-        self.funcs = {d.name: d for d in defs}
+        self.funcs = {d.name: d for d in defs if isinstance(d, FuncDef)}
+        self.records = {d.name: d for d in defs if isinstance(d, RecordDef)}
+        self.array_names = {}   # Array type -> generated C typedef name
 
     def generate(self):
+        self.collect_types()
         out = ["#include <stdio.h>", ""]
-        for d in self.defs:
+        out += self.emit_types()
+        for d in self.funcs.values():
             out.append(self.signature(d) + ";")
         out.append("")
-        for d in self.defs:
+        for d in self.funcs.values():
             out.extend(self.gen_func(d))
             out.append("")
         return "\n".join(out)
+
+    # ---- C types and aggregate typedefs ----
+
+    def ctype(self, t):
+        if isinstance(t, Scalar):
+            return {"V": "void", "B": "char", "W": "size_t", "F": "double"}[t.k]
+        if isinstance(t, Ptr):
+            return self.ctype(t.e) + "*"
+        if isinstance(t, Array):
+            return self.array_names[t]
+        if isinstance(t, Record):
+            return t.name
+        raise IonaError(0, "internal: no C type for this type")
+
+    def collect_types(self):
+        """Find every array type used anywhere and assign it a C typedef name."""
+        def visit(t):
+            if isinstance(t, Ptr):
+                visit(t.e)
+            elif isinstance(t, Array):
+                visit(t.e)
+                if t not in self.array_names:
+                    self.array_names[t] = f"_ARR{len(self.array_names)}"
+        for d in self.records.values():
+            for _, ft in d.fields:
+                visit(ft)
+        for d in self.funcs.values():
+            visit(d.ret)
+            for _, pt in d.params:
+                visit(pt)
+            self._visit_decls(d.body, visit)
+
+    def _visit_decls(self, stmts, visit):
+        for s in stmts:
+            if isinstance(s, Decl):
+                visit(s.type)
+            elif isinstance(s, If):
+                self._visit_decls(s.then_body, visit)
+                if s.else_body:
+                    self._visit_decls(s.else_body, visit)
+            elif isinstance(s, While):
+                self._visit_decls(s.body, visit)
+
+    def emit_types(self):
+        """Emit record/array typedefs in dependency order (by-value members first).
+
+        Records are forward-typedef'd first so pointer fields can reference any
+        record; their bodies and the array wrappers are then emitted topologically.
+        """
+        out = [f"typedef struct {n} {n};" for n in self.records]
+
+        def by_value_deps(key):
+            kind, x = key
+            if kind == "rec":
+                ts = [ft for _, ft in self.records[x].fields]
+            else:
+                ts = [x.e]
+            deps = []
+            for t in ts:
+                if isinstance(t, Record):
+                    deps.append(("rec", t.name))
+                elif isinstance(t, Array):
+                    deps.append(("arr", t))
+            return deps
+
+        def text(key):
+            kind, x = key
+            if kind == "rec":
+                fields = "".join(f" {self.ctype(ft)} {fn};" for fn, ft in self.records[x].fields)
+                return f"struct {x} {{{fields} }};"
+            return f"typedef struct {{ {self.ctype(x.e)} a[{x.n}]; }} {self.array_names[x]};"
+
+        emitted, visiting = set(), set()
+
+        def emit(key):
+            if key in emitted:
+                return
+            if key in visiting:
+                raise IonaError(0, "recursive type without a pointer (infinite size)")
+            visiting.add(key)
+            for dep in by_value_deps(key):
+                emit(dep)
+            visiting.discard(key)
+            emitted.add(key)
+            out.append(text(key))
+
+        for n in self.records:
+            emit(("rec", n))
+        for a in self.array_names:
+            emit(("arr", a))
+        if len(out) > len(self.records):
+            out.append("")
+        elif self.records:
+            out.append("")
+        return out
 
     @staticmethod
     def cname(name):
@@ -562,8 +764,8 @@ class CodeGen:
             if d.ret != WORD:
                 raise IonaError(d.lineno, "MAIN must return W")
             return "int main(void)"
-        params = ", ".join(f"{ctype(pt)} {pn}" for pn, pt in d.params) or "void"
-        return f"{ctype(d.ret)} {self.cname(d.name)}({params})"
+        params = ", ".join(f"{self.ctype(pt)} {pn}" for pn, pt in d.params) or "void"
+        return f"{self.ctype(d.ret)} {self.cname(d.name)}({params})"
 
     def gen_func(self, d):
         ctx = FuncCtx(d.params, d.ret)
@@ -575,7 +777,7 @@ class CodeGen:
             return head + ["    int _ret = 0;"] + ctx.lines + ["    return _ret;", "}"]
         if d.ret == VOID:
             return head + ctx.lines + ["}"]
-        ret_decl = [f"    {ctype(d.ret)} _ret = {zero_init(d.ret)};"]
+        ret_decl = [f"    {self.ctype(d.ret)} _ret = {zero_init(d.ret)};"]
         return head + ret_decl + ctx.lines + ["    return _ret;", "}"]
 
     def gen_body(self, stmts, ctx, indent):
@@ -588,7 +790,7 @@ class CodeGen:
             if s.name in ctx.vars:
                 raise IonaError(s.lineno, f"`{s.name}` is already declared")
             ctx.vars[s.name] = s.type
-            ctx.emit(f"{pad}{ctype(s.type)} {s.name} = {zero_init(s.type)};")
+            ctx.emit(f"{pad}{self.ctype(s.type)} {s.name} = {zero_init(s.type)};")
             return
         if isinstance(s, Stmt):
             self.compile_tokens(s.tokens, ctx, [], indent, allow_effects=True)
@@ -632,6 +834,12 @@ class CodeGen:
                 raise IonaError(lineno, f"argument {k} of `{d.name}` expects "
                                         f"{pt.iname()}, got {a.type.iname()}")
 
+    def field_type(self, rec_type, fname, lineno):
+        for fn, ft in self.records[rec_type.name].fields:
+            if fn == fname:
+                return ft
+        raise IonaError(lineno, f"record {rec_type.name} has no field `{fname}`")
+
     # ---- conditions: build a boolean tree, then lower it to jumping code ----
 
     def compile_cond(self, tokens):
@@ -644,11 +852,22 @@ class CodeGen:
                 stack.append(FloatNode(t.value, t.lineno))
             elif t.kind == "str":
                 stack.append(StrNode(t.value, t.lineno))
+            elif t.kind == "field":
+                if not stack:
+                    raise IonaError(t.lineno, f"`.{t.value}` needs a record")
+                stack.append(FieldNode(stack.pop(), t.value, t.lineno))
             elif t.kind == "op":
                 if t.value == "!":
                     raise IonaError(t.lineno, "assignment is not allowed in a condition")
                 if t.value == "@":
                     raise IonaError(t.lineno, "`@` (return) is not allowed in a condition")
+                if t.value == "[":
+                    if len(stack) < 2:
+                        raise IonaError(t.lineno, "`[` needs an array and an index")
+                    idx = stack.pop()
+                    arr = stack.pop()
+                    stack.append(IndexNode(arr, idx, t.lineno))
+                    continue
                 if len(stack) < 2:
                     raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
                 b = stack.pop()
@@ -757,7 +976,21 @@ class CodeGen:
         if isinstance(node, VarNode):
             if node.name not in ctx.vars:
                 raise IonaError(node.lineno, f"undeclared name `{node.name}`")
-            return Value(node.name, ctx.vars[node.name])
+            return Value(node.name, ctx.vars[node.name], lvalue=True)
+        if isinstance(node, FieldNode):
+            v = self.emit_value(node.rec, ctx, pad)
+            if not isinstance(v.type, Record):
+                raise IonaError(node.lineno, f"`.{node.field}` needs a record, got {v.type.iname()}")
+            ft = self.field_type(v.type, node.field, node.lineno)
+            return Value(f"({v.expr}).{node.field}", ft, lvalue=v.lvalue)
+        if isinstance(node, IndexNode):
+            arr = self.emit_value(node.arr, ctx, pad)
+            idx = self.emit_value(node.idx, ctx, pad)
+            if not isinstance(arr.type, Array):
+                raise IonaError(node.lineno, f"`[` needs an array, got {arr.type.iname()}")
+            if idx.type != WORD:
+                raise IonaError(node.lineno, f"array index must be W, got {idx.type.iname()}")
+            return Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue)
         if isinstance(node, BinNode):
             a = self.emit_value(node.a, ctx, pad)
             b = self.emit_value(node.b, ctx, pad)
@@ -782,7 +1015,7 @@ class CodeGen:
                 raise IonaError(node.lineno, f"`{node.name}` returns nothing and has no value here")
             call = f"{self.cname(node.name)}(" + ", ".join(a.expr for a in args) + ")"
             tmp = ctx.new_tmp()
-            ctx.emit(f"{pad}{ctype(d.ret)} {tmp} = {call};")
+            ctx.emit(f"{pad}{self.ctype(d.ret)} {tmp} = {call};")
             return Value(tmp, d.ret)
         raise IonaError(getattr(node, "lineno", 0), "internal: bad value node")
 
@@ -795,17 +1028,41 @@ class CodeGen:
                 stack.append(Value(t.value, FLOAT))
             elif t.kind == "str":
                 stack.append(Value(self.c_string(t.value), Ptr(BYTE)))
+            elif t.kind == "field":
+                self.op_field(t, stack)
             elif t.kind == "op":
                 if t.value == "!":
                     self.op_assign(t, ctx, stack, pad)
                 elif t.value == "@":
                     self.op_return(t, ctx, stack, pad)
+                elif t.value == "[":
+                    self.op_index(t, stack)
                 else:
                     self.op_binary(t, stack)
             elif t.kind == "name":
                 self.compile_name(t, ctx, stack, pad)
             else:
                 raise IonaError(t.lineno, f"unexpected token {t.value!r}")
+
+    def op_field(self, t, stack):
+        if not stack:
+            raise IonaError(t.lineno, f"`.{t.value}` needs a record")
+        v = stack.pop()
+        if not isinstance(v.type, Record):
+            raise IonaError(t.lineno, f"`.{t.value}` needs a record, got {v.type.iname()}")
+        ft = self.field_type(v.type, t.value, t.lineno)
+        stack.append(Value(f"({v.expr}).{t.value}", ft, lvalue=v.lvalue))
+
+    def op_index(self, t, stack):
+        if len(stack) < 2:
+            raise IonaError(t.lineno, "`[` needs an array and an index")
+        idx = stack.pop()
+        arr = stack.pop()
+        if not isinstance(arr.type, Array):
+            raise IonaError(t.lineno, f"`[` needs an array, got {arr.type.iname()}")
+        if idx.type != WORD:
+            raise IonaError(t.lineno, f"array index must be W, got {idx.type.iname()}")
+        stack.append(Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue))
 
     def op_binary(self, t, stack):
         if len(stack) < 2:
@@ -825,15 +1082,12 @@ class CodeGen:
             raise IonaError(t.lineno, "assignment needs a value and a target")
         target = stack.pop()
         value = stack.pop()
-        name = target.expr
-        if not _NAME_RE.fullmatch(name):
-            raise IonaError(t.lineno, "assignment target must be a variable name")
-        if name not in ctx.vars:
-            raise IonaError(t.lineno, f"undeclared variable `{name}` (declare it with `!{name} TYPE`)")
-        if value.type != ctx.vars[name]:
-            raise IonaError(t.lineno, f"cannot assign {value.type.iname()} to `{name}` "
-                                      f"of type {ctx.vars[name].iname()}")
-        ctx.emit(f"{pad}{name} = {value.expr};")
+        if not target.lvalue:
+            raise IonaError(t.lineno, "assignment target is not a variable, field, or element")
+        if value.type != target.type:
+            raise IonaError(t.lineno, f"cannot assign {value.type.iname()} to a target "
+                                      f"of type {target.type.iname()}")
+        ctx.emit(f"{pad}{target.expr} = {value.expr};")
 
     def op_return(self, t, ctx, stack, pad):
         # `@` sets the result and keeps executing (cleanup after it still runs).
@@ -889,11 +1143,11 @@ class CodeGen:
                 return
             # Materialize into a temp so the call's evaluation order is pinned.
             tmp = ctx.new_tmp()
-            ctx.emit(f"{pad}{ctype(d.ret)} {tmp} = {call};")
+            ctx.emit(f"{pad}{self.ctype(d.ret)} {tmp} = {call};")
             stack.append(Value(tmp, d.ret))
             return
         if name in ctx.vars:
-            stack.append(Value(name, ctx.vars[name]))
+            stack.append(Value(name, ctx.vars[name], lvalue=True))
             return
         raise IonaError(t.lineno, f"undeclared name `{name}`")
 
