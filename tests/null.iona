@@ -1,0 +1,28 @@
+; THE NULL POINTER LITERAL. `NULL` works for any pointer type: it can be
+; assigned, compared, passed as an argument, and returned. (A pointer also
+; starts null from zero-init, and still compares against `0`.)
+
+!R NODE
+    VAL W
+    NEXT $NODE
+
+!EMPTY $NODE                  ; a function returning a null pointer
+    NULL @
+
+!ISNULL W, P $NODE
+    P NULL = ?
+        1 @
+    /
+        0 @
+
+!MAIN W
+    !P $NODE
+    P ISNULL PRINT            ; 1  -- a fresh pointer is null
+    NULL ISNULL PRINT         ; 1  -- NULL passed as an argument
+    EMPTY ISNULL PRINT        ; 1  -- null returned from a function
+    P NEW
+    P ISNULL PRINT            ; 0  -- now allocated
+    P FREE
+    NULL P!                   ; reset to null (no dangling pointer)
+    P ISNULL PRINT            ; 1
+    0 @

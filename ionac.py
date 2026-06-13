@@ -247,10 +247,19 @@ class Record:
         return self.name
 
 
+class NullType:
+    """The type of the `NULL` literal: accepted wherever any pointer is."""
+    __slots__ = ()
+    def __eq__(self, o): return isinstance(o, NullType)
+    def __hash__(self): return hash("null")
+    def iname(self): return "null"
+
+
 VOID = Scalar("V")
 BYTE = Scalar("B")
 WORD = Scalar("W")
 FLOAT = Scalar("F")
+NULLT = NullType()
 SCALARS = {"V": VOID, "B": BYTE, "W": WORD, "F": FLOAT}
 
 # Explicit conversion functions: postfix, one operand. (source, target, C cast)
@@ -603,6 +612,10 @@ class BitNotNode:     # unary bitwise complement: x BNOT
     __slots__ = ("x", "lineno")
     def __init__(self, x, lineno=0): self.x, self.lineno = x, lineno
 
+class NullNode:       # the NULL literal
+    __slots__ = ("lineno",)
+    def __init__(self, lineno=0): self.lineno = lineno
+
 class CallNode:       # f(args...)
     __slots__ = ("name", "args", "lineno")
     def __init__(self, name, args, lineno=0): self.name, self.args, self.lineno = name, args, lineno
@@ -896,7 +909,7 @@ class CodeGen:
         if len(args) != len(d.params):
             raise IonaError(lineno, f"`{d.name}` takes {len(d.params)} argument(s), got {len(args)}")
         for k, (a, (pn, pt)) in enumerate(zip(args, d.params), start=1):
-            if a.type != pt:
+            if a.type != pt and not (isinstance(pt, Ptr) and a.type == NULLT):
                 raise IonaError(lineno, f"argument {k} of `{d.name}` expects "
                                         f"{pt.iname()}, got {a.type.iname()}")
 
@@ -908,16 +921,21 @@ class CodeGen:
 
     def check_compare(self, op, a, b, lineno):
         """Operands of a comparison must match -- except a pointer may be
-        compared (`=`/`<>`) against the literal `0` for a null check."""
+        compared (`=`/`<>`) against `NULL` or the literal `0` for a null check."""
         if a.type == b.type:
             return
         if op in ("=", "<>"):
-            if isinstance(a.type, Ptr) and b.type == WORD and b.expr == "0":
+            if isinstance(a.type, Ptr) and self._is_null(b):
                 return
-            if isinstance(b.type, Ptr) and a.type == WORD and a.expr == "0":
+            if isinstance(b.type, Ptr) and self._is_null(a):
                 return
         raise IonaError(lineno, f"comparison `{op}` needs both operands the same type "
                                 f"(got {a.type.iname()} and {b.type.iname()})")
+
+    @staticmethod
+    def _is_null(v):
+        """A value usable as a null pointer: the NULL literal, or the integer 0."""
+        return v.type == NULLT or (v.type == WORD and v.expr == "0")
 
     def bit_binary(self, name, a, b, lineno):
         if a.type != b.type:
@@ -1011,6 +1029,8 @@ class CodeGen:
                     if not stack:
                         raise IonaError(t.lineno, "`BNOT` needs one operand")
                     stack.append(BitNotNode(stack.pop(), t.lineno))
+                elif name == "NULL":
+                    stack.append(NullNode(t.lineno))
                 elif name in self.funcs:
                     d = self.funcs[name]
                     if len(stack) < len(d.params):
@@ -1139,6 +1159,8 @@ class CodeGen:
             return self.bit_binary(node.name, a, b, node.lineno)
         if isinstance(node, BitNotNode):
             return self.bit_not(self.emit_value(node.x, ctx, pad), node.lineno)
+        if isinstance(node, NullNode):
+            return Value("0", NULLT)
         if isinstance(node, CallNode):
             d = self.funcs[node.name]
             args = [self.emit_value(a, ctx, pad) for a in node.args]
@@ -1236,7 +1258,7 @@ class CodeGen:
         value = stack.pop()
         if not target.lvalue:
             raise IonaError(t.lineno, "assignment target is not a variable, field, or element")
-        if value.type != target.type:
+        if value.type != target.type and not (isinstance(target.type, Ptr) and value.type == NULLT):
             raise IonaError(t.lineno, f"cannot assign {value.type.iname()} to a target "
                                       f"of type {target.type.iname()}")
         ctx.emit(f"{pad}{target.expr} = {value.expr};")
@@ -1250,7 +1272,7 @@ class CodeGen:
         if not stack:
             raise IonaError(t.lineno, f"`@` needs a value (this function returns {ctx.ret.iname()})")
         v = stack.pop()
-        if v.type != ctx.ret:
+        if v.type != ctx.ret and not (isinstance(ctx.ret, Ptr) and v.type == NULLT):
             raise IonaError(t.lineno, f"`@` returns {ctx.ret.iname()} but the value is {v.type.iname()}")
         ctx.emit(f"{pad}_ret = {v.expr};")
 
@@ -1258,6 +1280,9 @@ class CodeGen:
         name = t.value
         if name in LOGICAL:
             raise IonaError(t.lineno, f"`{name}` is a logical operator and is only allowed in a condition")
+        if name == "NULL":
+            stack.append(Value("0", NULLT))
+            return
         if name == "PRINT":
             if not stack:
                 raise IonaError(t.lineno, "`PRINT` needs a value")

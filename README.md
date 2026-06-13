@@ -163,8 +163,9 @@ pointer dereference.)
 
 There is no garbage collector. `P NEW` allocates a fresh, zero-initialized
 object on the heap and points `P` at it (the type to allocate is `P`'s own
-pointed-to type); `P FREE` releases it. A pointer is null until allocated, and
-compares against `0` for null — enough to build and walk a linked list:
+pointed-to type); `P FREE` releases it. A pointer is null until allocated. The
+literal `NULL` is the null pointer for *any* pointer type — it can be assigned,
+compared, passed, and returned — and a pointer also compares against `0`:
 
 ```
 !R NODE
@@ -289,6 +290,7 @@ unary `BNOT`. The `B` prefix keeps them distinct from the logical words above
 | `P^` | dereference a pointer (an lvalue) |
 | `P NEW` | allocate a zero-initialized object on the heap, point `P` at it |
 | `P FREE` | free the object `P` points at |
+| `NULL` | the null pointer (any pointer type) |
 | `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
 | `VALUE TARGET!` | assign into a variable, field, or element (types must match) |
 | `X PRINT` | print a `B`, `W`, `F`, or string value, then a newline |
@@ -321,6 +323,7 @@ other. A non-void function's result defaults to `0` if no `@` is reached.
 - Integer literals are `W`: `0`, `42`, `3628800`.
 - Float literals are `F` and need a decimal point: `2.5`, `3.14`.
 - String literals are `$B`: `"HELLO"`, with `\n`, `\t`, `\"`, `\\` escapes.
+- `NULL` is the null pointer, valid for any pointer type.
 - Comments run from `;` to end of line.
 - Indentation uses spaces; tabs are rejected.
 
@@ -346,8 +349,7 @@ v0 runs real recursive and iterative programs, statically type-checks them, and
 supports records, arrays, pointers, and heap allocation — enough for genuine
 linked structures (see `examples/heap.iona`). Natural next steps:
 
-- A typed allocation that takes a runtime count (dynamic arrays), and perhaps a
-  null literal so a pointer can be re-nulled (today only `0`-comparison exists).
+- A typed allocation that takes a runtime count (dynamic arrays).
 - A counted-loop step / count-down (today the step is fixed at `+1`).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.
