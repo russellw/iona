@@ -159,6 +159,29 @@ parameters, and passing large aggregates without copying them.
 (`^` is rendered as an up-arrow on a 1960s teletype — the glyph Pascal used for
 pointer dereference.)
 
+### Manual memory
+
+There is no garbage collector. `P NEW` allocates a fresh, zero-initialized
+object on the heap and points `P` at it (the type to allocate is `P`'s own
+pointed-to type); `P FREE` releases it. A pointer is null until allocated, and
+compares against `0` for null — enough to build and walk a linked list:
+
+```
+!R NODE
+    VAL W
+    NEXT $NODE
+
+!MAIN W
+    !HEAD $NODE
+    !N $NODE
+    N NEW                      ; N points at a fresh NODE
+    5 N^.VAL !
+    HEAD N^.NEXT !             ; N->NEXT = HEAD (null at first)
+    N HEAD!
+    ; ... walk with `P 0 <> &`, then free each node with `P FREE`
+```
+
+
 ### Definitions
 
 A definition is a `!` followed by comma-separated `NAME TYPE` groups: the first
@@ -247,6 +270,8 @@ short-circuit evaluation and tight fused compare-and-branch output.
 | `ARR I [` | subscript an array (postfix): `ARR[I]` |
 | `X$` | address of an lvalue (a pointer) |
 | `P^` | dereference a pointer (an lvalue) |
+| `P NEW` | allocate a zero-initialized object on the heap, point `P` at it |
+| `P FREE` | free the object `P` points at |
 | `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
 | `VALUE TARGET!` | assign into a variable, field, or element (types must match) |
 | `X PRINT` | print a `B`, `W`, `F`, or string value, then a newline |
@@ -301,14 +326,13 @@ other. A non-void function's result defaults to `0` if no `@` is reached.
 ## Status and roadmap
 
 v0 runs real recursive and iterative programs, statically type-checks them, and
-supports records, arrays, and pointers (see `examples/` and `tests/`). Natural
-next steps:
+supports records, arrays, pointers, and heap allocation — enough for genuine
+linked structures (see `examples/heap.iona`). Natural next steps:
 
-- **Manual memory** — `malloc`/`free` (a stack or arena allocator) — so pointers
-  can build heap-allocated linked structures, not just reference existing
-  storage.
 - `for` loops; bitwise operators as value operators, kept distinct from the
   short-circuit logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s
   teletype, word forms are the period-accurate choice).
+- A typed allocation that takes a runtime count (dynamic arrays), and perhaps a
+  null literal so a pointer can be re-nulled (today only `0`-comparison exists).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.

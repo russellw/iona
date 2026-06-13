@@ -621,12 +621,6 @@ def arith_result(op, ta, tb, lineno):
     return ta
 
 
-def cmp_check(op, ta, tb, lineno):
-    if ta != tb:
-        raise IonaError(lineno, f"comparison `{op}` needs both operands the same type "
-                                f"(got {ta.iname()} and {tb.iname()})")
-
-
 class FuncCtx:
     """Per-function code-generation state."""
 
@@ -658,7 +652,7 @@ class CodeGen:
 
     def generate(self):
         self.collect_types()
-        out = ["#include <stdio.h>", ""]
+        out = ["#include <stdio.h>", "#include <stdlib.h>", ""]
         out += self.emit_types()
         for d in self.funcs.values():
             out.append(self.signature(d) + ";")
@@ -850,6 +844,19 @@ class CodeGen:
                 return ft
         raise IonaError(lineno, f"record {rec_type.name} has no field `{fname}`")
 
+    def check_compare(self, op, a, b, lineno):
+        """Operands of a comparison must match -- except a pointer may be
+        compared (`=`/`<>`) against the literal `0` for a null check."""
+        if a.type == b.type:
+            return
+        if op in ("=", "<>"):
+            if isinstance(a.type, Ptr) and b.type == WORD and b.expr == "0":
+                return
+            if isinstance(b.type, Ptr) and a.type == WORD and a.expr == "0":
+                return
+        raise IonaError(lineno, f"comparison `{op}` needs both operands the same type "
+                                f"(got {a.type.iname()} and {b.type.iname()})")
+
     # ---- conditions: build a boolean tree, then lower it to jumping code ----
 
     def compile_cond(self, tokens):
@@ -909,8 +916,8 @@ class CodeGen:
                     a = self.as_bool(stack.pop())
                     cls = AndNode if name == "AND" else OrNode
                     stack.append(cls(a, b, t.lineno))
-                elif name == "PRINT":
-                    raise IonaError(t.lineno, "`PRINT` cannot be used in a condition")
+                elif name in ("PRINT", "NEW", "FREE"):
+                    raise IonaError(t.lineno, f"`{name}` cannot be used in a condition")
                 elif name in CONVERSIONS:
                     if not stack:
                         raise IonaError(t.lineno, f"`{name}` needs one operand")
@@ -974,7 +981,7 @@ class CodeGen:
         pad = "    " * indent
         a = self.emit_value(node.a, ctx, pad)
         b = self.emit_value(node.b, ctx, pad)
-        cmp_check(node.op, a.type, b.type, node.lineno)
+        self.check_compare(node.op, a, b, node.lineno)
         cmp = f"({a.expr} {C_OP.get(node.op, node.op)} {b.expr})"
         if t_lbl is not None and f_lbl is not None:
             ctx.emit(f"{pad}if {cmp} goto {t_lbl};")
@@ -1029,7 +1036,7 @@ class CodeGen:
         if isinstance(node, RelNode):
             a = self.emit_value(node.a, ctx, pad)
             b = self.emit_value(node.b, ctx, pad)
-            cmp_check(node.op, a.type, b.type, node.lineno)
+            self.check_compare(node.op, a, b, node.lineno)
             return Value(f"({a.expr} {C_OP.get(node.op, node.op)} {b.expr})", WORD)
         if isinstance(node, ConvNode):
             v = self.emit_value(node.arg, ctx, pad)
@@ -1121,7 +1128,7 @@ class CodeGen:
         a = stack.pop()
         cop = C_OP.get(t.value, t.value)
         if t.value in COMPARES:
-            cmp_check(t.value, a.type, b.type, t.lineno)
+            self.check_compare(t.value, a, b, t.lineno)
             stack.append(Value(f"({a.expr} {cop} {b.expr})", WORD))
         else:
             rt = arith_result(t.value, a.type, b.type, t.lineno)
@@ -1171,6 +1178,25 @@ class CodeGen:
             else:
                 raise IonaError(t.lineno, f"cannot PRINT a value of type {v.type.iname()}")
             ctx.emit(f'{pad}printf("{fmt}\\n", {v.expr});')
+            return
+        if name == "NEW":
+            if not stack:
+                raise IonaError(t.lineno, "`NEW` needs a pointer to allocate into")
+            v = stack.pop()
+            if not v.lvalue:
+                raise IonaError(t.lineno, "`NEW` needs an assignable pointer (variable, field, or element)")
+            if not isinstance(v.type, Ptr):
+                raise IonaError(t.lineno, f"`NEW` needs a pointer, got {v.type.iname()}")
+            ct = self.ctype(v.type.e)
+            ctx.emit(f"{pad}{v.expr} = ({ct}*)calloc(1, sizeof({ct}));")
+            return
+        if name == "FREE":
+            if not stack:
+                raise IonaError(t.lineno, "`FREE` needs a pointer")
+            v = stack.pop()
+            if not isinstance(v.type, Ptr):
+                raise IonaError(t.lineno, f"`FREE` needs a pointer, got {v.type.iname()}")
+            ctx.emit(f"{pad}free({v.expr});")
             return
         if name in CONVERSIONS:
             if not stack:

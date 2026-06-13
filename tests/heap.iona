@@ -1,0 +1,38 @@
+; MANUAL MEMORY: `P NEW` allocates a zero-initialized object on the heap and
+; points P at it; `P FREE` releases it. A pointer is null until allocated, and
+; compares against `0` for null -- enough to build and walk a linked list.
+
+!R NODE
+    VAL W
+    NEXT $NODE
+
+!MAIN W
+    !HEAD $NODE
+    !N $NODE
+    !P $NODE
+    !SUM W
+
+    ; build HEAD -> 1 -> 2 -> 3 by prepending 3, then 2, then 1
+    !I W
+    3 I!
+    I 0 > &
+        N NEW                  ; N = a fresh NODE
+        I N^.VAL !             ; N->VAL = I
+        HEAD N^.NEXT !         ; N->NEXT = HEAD
+        N HEAD!                ; HEAD = N
+        I 1 - I!
+
+    ; walk the list, summing
+    0 SUM!
+    HEAD P!
+    P 0 <> &                   ; while P is not null
+        P^.VAL  SUM +  SUM!
+        P^.NEXT P!
+    SUM PRINT                  ; 1 + 2 + 3 = 6
+
+    ; free every node
+    HEAD P!
+    P 0 <> &
+        P^.NEXT N!             ; save NEXT before freeing
+        P FREE
+        N P!
