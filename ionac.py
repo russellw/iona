@@ -349,6 +349,15 @@ class While:
         self.lineno = lineno
 
 
+class For:
+    def __init__(self, var, start, limit, body, lineno):
+        self.var = var              # loop variable name (a declared W)
+        self.start = start          # list[Token]: start expression
+        self.limit = limit          # list[Token]: limit expression (re-checked each pass)
+        self.body = body
+        self.lineno = lineno
+
+
 class Stmt:
     def __init__(self, tokens, lineno):
         self.tokens = tokens
@@ -525,9 +534,18 @@ class Parser:
                     else_body = self.parse_block(indent)
                 return If(toks[:-1], then_body, else_body, line.lineno)
             if kw == "&":
+                spec = toks[:-1]
                 self.i += 1
                 body = self.parse_block(indent)
-                return While(toks[:-1], body, line.lineno)
+                if any(tk.kind == "comma" for tk in spec):
+                    groups = split_groups(spec, line.lineno)
+                    if len(groups) != 3:
+                        raise IonaError(line.lineno, "counted loop is `VAR, START, LIMIT &`")
+                    var_g, start_g, limit_g = groups
+                    if len(var_g) != 1 or var_g[0].kind != "name":
+                        raise IonaError(line.lineno, "counted-loop variable must be a single name")
+                    return For(var_g[0].value, start_g, limit_g, body, line.lineno)
+                return While(spec, body, line.lineno)
             raise IonaError(line.lineno, f"unknown block header ending in `{kw}`")
         self.i += 1
         return Stmt(toks, line.lineno)
@@ -826,9 +844,40 @@ class CodeGen:
             ctx.emit(f"{pad}goto {l_top};")
             ctx.emit(f"{pad}{l_end}: ;")
             return
+        if isinstance(s, For):
+            if s.var not in ctx.vars:
+                raise IonaError(s.lineno, f"counted-loop variable `{s.var}` is not declared")
+            if ctx.vars[s.var] != WORD:
+                raise IonaError(s.lineno, f"counted-loop variable `{s.var}` must be W, "
+                                          f"is {ctx.vars[s.var].iname()}")
+            start = self.compile_expr(s.start, ctx, indent)
+            if start.type != WORD:
+                raise IonaError(s.lineno, f"counted-loop start must be W, got {start.type.iname()}")
+            ctx.emit(f"{pad}{s.var} = {start.expr};")
+            l_top = ctx.new_label()
+            l_end = ctx.new_label()
+            ctx.emit(f"{pad}{l_top}: ;")
+            limit = self.compile_expr(s.limit, ctx, indent)   # re-checked each pass
+            if limit.type != WORD:
+                raise IonaError(s.lineno, f"counted-loop limit must be W, got {limit.type.iname()}")
+            ctx.emit(f"{pad}if (!({s.var} < {limit.expr})) goto {l_end};")
+            self.gen_body(s.body, ctx, indent + 1)
+            ctx.emit(f"{pad}{s.var} = ({s.var} + 1);")
+            ctx.emit(f"{pad}goto {l_top};")
+            ctx.emit(f"{pad}{l_end}: ;")
+            return
         if isinstance(s, FuncDef):
             raise IonaError(s.lineno, "nested function definitions are not supported")
         raise IonaError(0, f"internal: unknown statement {s!r}")
+
+    def compile_expr(self, tokens, ctx, indent):
+        """Compile a postfix value expression to a single Value (for loop bounds)."""
+        stack = []
+        self.compile_tokens(tokens, ctx, stack, indent, allow_effects=False)
+        if len(stack) != 1:
+            ln = tokens[0].lineno if tokens else 0
+            raise IonaError(ln, f"expected exactly one value (got {len(stack)})")
+        return stack[0]
 
     def check_args(self, d, args, lineno):
         if len(args) != len(d.params):

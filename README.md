@@ -242,6 +242,16 @@ I N < &
     I 1 + I!
 ```
 
+A **counted loop** is the comma-bearing form of the same `&`: `VAR, START, LIMIT &`
+runs the (pre-declared `W`) variable `VAR` from `START` up to — but not
+including — `LIMIT`, stepping by one. The limit is re-checked each pass:
+
+```
+!I W
+I, 0, 10 &              ; I = 0, 1, ... 9
+    I PRINT
+```
+
 ### Logical operators (conditions only)
 
 `AND`, `OR`, and `NOT` combine conditions and **short-circuit**: `OR` stops at
@@ -329,9 +339,9 @@ v0 runs real recursive and iterative programs, statically type-checks them, and
 supports records, arrays, pointers, and heap allocation — enough for genuine
 linked structures (see `examples/heap.iona`). Natural next steps:
 
-- `for` loops; bitwise operators as value operators, kept distinct from the
-  short-circuit logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s
-  teletype, word forms are the period-accurate choice).
+- Bitwise operators as value operators, kept distinct from the short-circuit
+  logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s teletype, word
+  forms are the period-accurate choice).
 - A typed allocation that takes a runtime count (dynamic arrays), and perhaps a
   null literal so a pointer can be re-nulled (today only `0`-comparison exists).
 - Multiple return values and the stack-effect comments Forth is known for.

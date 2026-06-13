@@ -1,0 +1,27 @@
+; COUNTED LOOP: `VAR, START, LIMIT &` runs VAR from START up to (not including)
+; LIMIT, step +1. It is the comma-bearing form of the `&` loop; a plain `COND &`
+; is still a while. The loop variable is a pre-declared W.
+
+!SUMTO W, N W                  ; sum 0 .. N-1
+    !I W
+    !S W
+    0 S!
+    I, 0, N &                  ; limit is an expression (the parameter N)
+        I  S +  S!
+    S @
+
+!MAIN W
+    !I W
+    !J W
+    !SUM W
+
+    I, 0, 5 &                  ; prints 0 1 2 3 4
+        I PRINT
+
+    10 SUMTO PRINT             ; 0+1+...+9 = 45
+
+    0 SUM!                     ; nested loops over a 3x3 grid
+    I, 0, 3 &
+        J, 0, 3 &
+            I J *  SUM +  SUM!
+    SUM PRINT                  ; (0+1+2)(0+1+2) = 9
