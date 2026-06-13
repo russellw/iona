@@ -59,6 +59,11 @@ C_OP = {"=": "==", "<>": "!="}
 # Short-circuit logical connectives: condition-only control-flow words.
 LOGICAL = {"AND", "OR", "NOT"}
 
+# Bitwise operators are value operators (on integer types B/W), spelled as words
+# with a `B` prefix to keep them distinct from the logical `AND`/`OR`/`NOT`. The
+# binary ones map to a C operator; `BNOT` is unary (`~`).
+BITOPS = {"BAND": "&", "BOR": "|", "BXOR": "^", "BSHL": "<<", "BSHR": ">>"}
+
 # Identifiers are UPPERCASE letters and digits only (a 1960s teletype had no
 # lowercase, and its 0x5F position was a left-arrow rather than `_`).
 _NAME_RE = re.compile(r"[A-Z][A-Z0-9]*")
@@ -590,6 +595,14 @@ class ConvNode:       # explicit conversion: arg NAME  (e.g. X W2F)
     __slots__ = ("name", "arg", "lineno")
     def __init__(self, name, arg, lineno=0): self.name, self.arg, self.lineno = name, arg, lineno
 
+class BitNode:        # binary bitwise: a BAND b, etc.
+    __slots__ = ("name", "a", "b", "lineno")
+    def __init__(self, name, a, b, lineno=0): self.name, self.a, self.b, self.lineno = name, a, b, lineno
+
+class BitNotNode:     # unary bitwise complement: x BNOT
+    __slots__ = ("x", "lineno")
+    def __init__(self, x, lineno=0): self.x, self.lineno = x, lineno
+
 class CallNode:       # f(args...)
     __slots__ = ("name", "args", "lineno")
     def __init__(self, name, args, lineno=0): self.name, self.args, self.lineno = name, args, lineno
@@ -906,6 +919,23 @@ class CodeGen:
         raise IonaError(lineno, f"comparison `{op}` needs both operands the same type "
                                 f"(got {a.type.iname()} and {b.type.iname()})")
 
+    def bit_binary(self, name, a, b, lineno):
+        if a.type != b.type:
+            raise IonaError(lineno, f"`{name}` needs both operands the same type "
+                                    f"(got {a.type.iname()} and {b.type.iname()})")
+        if a.type not in (BYTE, WORD):
+            raise IonaError(lineno, f"`{name}` needs an integer type (B or W), got {a.type.iname()}")
+        left = a.expr
+        # Shift a W in full size_t width (a bare int literal would only be 32-bit).
+        if name in ("BSHL", "BSHR") and a.type == WORD:
+            left = f"(size_t)({a.expr})"
+        return Value(f"({left} {BITOPS[name]} {b.expr})", a.type)
+
+    def bit_not(self, v, lineno):
+        if v.type not in (BYTE, WORD):
+            raise IonaError(lineno, f"`BNOT` needs an integer type (B or W), got {v.type.iname()}")
+        return Value(f"(~{v.expr})", v.type)
+
     # ---- conditions: build a boolean tree, then lower it to jumping code ----
 
     def compile_cond(self, tokens):
@@ -971,6 +1001,16 @@ class CodeGen:
                     if not stack:
                         raise IonaError(t.lineno, f"`{name}` needs one operand")
                     stack.append(ConvNode(name, stack.pop(), t.lineno))
+                elif name in BITOPS:
+                    if len(stack) < 2:
+                        raise IonaError(t.lineno, f"`{name}` needs two operands")
+                    b = stack.pop()
+                    a = stack.pop()
+                    stack.append(BitNode(name, a, b, t.lineno))
+                elif name == "BNOT":
+                    if not stack:
+                        raise IonaError(t.lineno, "`BNOT` needs one operand")
+                    stack.append(BitNotNode(stack.pop(), t.lineno))
                 elif name in self.funcs:
                     d = self.funcs[name]
                     if len(stack) < len(d.params):
@@ -1093,6 +1133,12 @@ class CodeGen:
             if v.type != src:
                 raise IonaError(node.lineno, f"`{node.name}` expects {src.iname()}, got {v.type.iname()}")
             return Value(f"({cast})({v.expr})", dst)
+        if isinstance(node, BitNode):
+            a = self.emit_value(node.a, ctx, pad)
+            b = self.emit_value(node.b, ctx, pad)
+            return self.bit_binary(node.name, a, b, node.lineno)
+        if isinstance(node, BitNotNode):
+            return self.bit_not(self.emit_value(node.x, ctx, pad), node.lineno)
         if isinstance(node, CallNode):
             d = self.funcs[node.name]
             args = [self.emit_value(a, ctx, pad) for a in node.args]
@@ -1217,16 +1263,16 @@ class CodeGen:
                 raise IonaError(t.lineno, "`PRINT` needs a value")
             v = stack.pop()
             if v.type == WORD:
-                fmt = "%zu"
+                fmt, arg = "%zu", f"(size_t)({v.expr})"   # printf varargs won't convert
             elif v.type == BYTE:
-                fmt = "%d"
+                fmt, arg = "%d", v.expr
             elif v.type == FLOAT:
-                fmt = "%g"
+                fmt, arg = "%g", v.expr
             elif v.type == Ptr(BYTE):
-                fmt = "%s"
+                fmt, arg = "%s", v.expr
             else:
                 raise IonaError(t.lineno, f"cannot PRINT a value of type {v.type.iname()}")
-            ctx.emit(f'{pad}printf("{fmt}\\n", {v.expr});')
+            ctx.emit(f'{pad}printf("{fmt}\\n", {arg});')
             return
         if name == "NEW":
             if not stack:
@@ -1255,6 +1301,18 @@ class CodeGen:
             if v.type != src:
                 raise IonaError(t.lineno, f"`{name}` expects {src.iname()}, got {v.type.iname()}")
             stack.append(Value(f"({cast})({v.expr})", dst))
+            return
+        if name in BITOPS:
+            if len(stack) < 2:
+                raise IonaError(t.lineno, f"`{name}` needs two operands")
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(self.bit_binary(name, a, b, t.lineno))
+            return
+        if name == "BNOT":
+            if not stack:
+                raise IonaError(t.lineno, "`BNOT` needs one operand")
+            stack.append(self.bit_not(stack.pop(), t.lineno))
             return
         if name in self.funcs:
             d = self.funcs[name]

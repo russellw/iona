@@ -269,6 +269,11 @@ as *jumping code*: instead of computing a `0`/`1` and testing it, each part
 branches straight to a true- or false-label. That one mechanism yields both
 short-circuit evaluation and tight fused compare-and-branch output.
 
+The **bitwise** operators are a separate family — ordinary value operators on
+integer (`B`/`W`) operands, spelled `BAND` `BOR` `BXOR` `BSHL` `BSHR` and the
+unary `BNOT`. The `B` prefix keeps them distinct from the logical words above
+(`5 4 BAND` is `5 & 4`; `5 0 > 4 0 > AND` is short-circuit logic).
+
 ### Built-ins
 
 | Form | Meaning |
@@ -276,6 +281,8 @@ short-circuit evaluation and tight fused compare-and-branch output.
 | `+ - * / %` | arithmetic on two operands of the same numeric type (`%` not on `F`) |
 | `= <> < > <= >=` | comparisons of two same-typed operands (yield `W`, `0`/`1`) |
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
+| `BAND BOR BXOR BSHL BSHR` | bitwise `& \| ^ << >>` (integer values) |
+| `BNOT` | bitwise complement `~` (unary) |
 | `REC.FIELD` | read/write a record field |
 | `ARR I [` | subscript an array (postfix): `ARR[I]` |
 | `X$` | address of an lvalue (a pointer) |
@@ -339,10 +346,8 @@ v0 runs real recursive and iterative programs, statically type-checks them, and
 supports records, arrays, pointers, and heap allocation — enough for genuine
 linked structures (see `examples/heap.iona`). Natural next steps:
 
-- Bitwise operators as value operators, kept distinct from the short-circuit
-  logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s teletype, word
-  forms are the period-accurate choice).
 - A typed allocation that takes a runtime count (dynamic arrays), and perhaps a
   null literal so a pointer can be re-nulled (today only `0`-comparison exists).
+- A counted-loop step / count-down (today the step is fixed at `+1`).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.
