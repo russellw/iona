@@ -135,6 +135,30 @@ There is no decay and no bounds check.
 Access chains freely — `B.CELLS I [`, `B.CORNER.X`, `PTS I [ .Y` — and nested
 aggregates (a record with an array field, an array of records) work too.
 
+### Pointers
+
+`X$` takes the address of an lvalue (a variable, field, or element), giving a
+pointer. `P^` dereferences a pointer, and the result is itself an lvalue — so it
+can be read or written. This is what makes `$T` types useful: by-reference
+parameters, and passing large aggregates without copying them.
+
+```
+!INCR V, P $W
+    P^ 1 +  P^ !            ; *P = *P + 1
+
+!SUM3 W, A $A 3 W           ; a pointer to the array -- no copy
+    A^ 0 [  A^ 1 [  +  A^ 2 [  +  @
+
+!MAIN W
+    !N W
+    5 N!
+    N$ INCR                 ; pass &N; INCR mutates it through the pointer
+    N PRINT                 ; 6
+```
+
+(`^` is rendered as an up-arrow on a 1960s teletype — the glyph Pascal used for
+pointer dereference.)
+
 ### Definitions
 
 A definition is a `!` followed by comma-separated `NAME TYPE` groups: the first
@@ -221,6 +245,8 @@ short-circuit evaluation and tight fused compare-and-branch output.
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
 | `REC.FIELD` | read/write a record field |
 | `ARR I [` | subscript an array (postfix): `ARR[I]` |
+| `X$` | address of an lvalue (a pointer) |
+| `P^` | dereference a pointer (an lvalue) |
 | `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
 | `VALUE TARGET!` | assign into a variable, field, or element (types must match) |
 | `X PRINT` | print a `B`, `W`, `F`, or string value, then a newline |
@@ -275,11 +301,12 @@ other. A non-void function's result defaults to `0` if no `@` is reached.
 ## Status and roadmap
 
 v0 runs real recursive and iterative programs, statically type-checks them, and
-supports records and arrays with value semantics (see `examples/` and `tests/`).
-Natural next steps:
+supports records, arrays, and pointers (see `examples/` and `tests/`). Natural
+next steps:
 
-- **Pointer operations** — dereference and address-of — to make the `$T` types
-  usable (linked structures, by-reference passing of large aggregates).
+- **Manual memory** — `malloc`/`free` (a stack or arena allocator) — so pointers
+  can build heap-allocated linked structures, not just reference existing
+  storage.
 - `for` loops; bitwise operators as value operators, kept distinct from the
   short-circuit logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s
   teletype, word forms are the period-accurate choice).

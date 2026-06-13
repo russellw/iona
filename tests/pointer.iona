@@ -1,0 +1,21 @@
+; POINTERS: `X$` takes the address of an lvalue; `P^` dereferences (an lvalue,
+; so it reads OR writes). This is what enables by-reference parameters and
+; passing large aggregates without copying.
+
+!INCR V, P $W
+    P^ 1 +  P^ !              ; *P = *P + 1
+
+!SUM3 W, A $A 3 W            ; takes a pointer to the array -- no copy
+    A^ 0 [  A^ 1 [  +  A^ 2 [  +  @
+
+!MAIN W
+    !N W
+    5 N!
+    N$ INCR                   ; pass &N; INCR mutates it through the pointer
+    N PRINT                   ; 6
+
+    !BUF A 3 W
+    10 BUF 0 [ !
+    20 BUF 1 [ !
+    30 BUF 2 [ !
+    BUF$ SUM3 PRINT           ; 60

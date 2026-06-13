@@ -42,12 +42,14 @@ class IonaError(Exception):
 # Surface operators. `=` is equality and `<>` is not-equal (ALGOL-style). `!` is
 # assignment when it trails a name and the definition marker when it leads a
 # line. `?`/`&` trail a condition (conditional / while loop), `@` trails a value
-# to return it, and `$` prefixes a type to mean "pointer to". These markers are
-# lexed as `op` tokens; the parser interprets them by position.
+# to return it. `$` prefixes a type to mean "pointer to" and, postfix in an
+# expression, takes a value's address; `^` postfix dereferences a pointer (on a
+# 1960s teletype `^` printed as the up-arrow Pascal used for pointers). These
+# markers are lexed as `op` tokens; the parser interprets them by position.
 # `.F` accesses field F of a record; `[` is the postfix array subscript
 # (`BUF I [` is BUF[I]). Multi-character operators are tried before their
 # single-char prefixes.
-OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "&", "$", "[",
+OPERATORS = ["<=", ">=", "<>", "<", ">", "=", "!", "?", "@", "&", "$", "^", "[",
              "+", "-", "*", "/", "%"]
 COMPARES = {"<=", ">=", "<>", "<", ">", "="}
 
@@ -582,6 +584,14 @@ class IndexNode:      # array subscript: arr[idx]
     __slots__ = ("arr", "idx", "lineno")
     def __init__(self, arr, idx, lineno=0): self.arr, self.idx, self.lineno = arr, idx, lineno
 
+class AddrNode:       # address-of: x$
+    __slots__ = ("x", "lineno")
+    def __init__(self, x, lineno=0): self.x, self.lineno = x, lineno
+
+class DerefNode:      # dereference: p^
+    __slots__ = ("x", "lineno")
+    def __init__(self, x, lineno=0): self.x, self.lineno = x, lineno
+
 class RelNode:        # boolean leaf: a <cmp> b
     __slots__ = ("op", "a", "b", "lineno")
     def __init__(self, op, a, b, lineno=0): self.op, self.a, self.b, self.lineno = op, a, b, lineno
@@ -868,6 +878,16 @@ class CodeGen:
                     arr = stack.pop()
                     stack.append(IndexNode(arr, idx, t.lineno))
                     continue
+                if t.value == "$":
+                    if not stack:
+                        raise IonaError(t.lineno, "`$` (address-of) needs a value")
+                    stack.append(AddrNode(stack.pop(), t.lineno))
+                    continue
+                if t.value == "^":
+                    if not stack:
+                        raise IonaError(t.lineno, "`^` (dereference) needs a pointer")
+                    stack.append(DerefNode(stack.pop(), t.lineno))
+                    continue
                 if len(stack) < 2:
                     raise IonaError(t.lineno, f"operator `{t.value}` needs two operands")
                 b = stack.pop()
@@ -991,6 +1011,16 @@ class CodeGen:
             if idx.type != WORD:
                 raise IonaError(node.lineno, f"array index must be W, got {idx.type.iname()}")
             return Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue)
+        if isinstance(node, AddrNode):
+            v = self.emit_value(node.x, ctx, pad)
+            if not v.lvalue:
+                raise IonaError(node.lineno, "cannot take the address of this expression")
+            return Value(f"(&{v.expr})", Ptr(v.type), lvalue=False)
+        if isinstance(node, DerefNode):
+            v = self.emit_value(node.x, ctx, pad)
+            if not isinstance(v.type, Ptr):
+                raise IonaError(node.lineno, f"`^` needs a pointer, got {v.type.iname()}")
+            return Value(f"(*{v.expr})", v.type.e, lvalue=True)
         if isinstance(node, BinNode):
             a = self.emit_value(node.a, ctx, pad)
             b = self.emit_value(node.b, ctx, pad)
@@ -1037,12 +1067,32 @@ class CodeGen:
                     self.op_return(t, ctx, stack, pad)
                 elif t.value == "[":
                     self.op_index(t, stack)
+                elif t.value == "$":
+                    self.op_addr(t, stack)
+                elif t.value == "^":
+                    self.op_deref(t, stack)
                 else:
                     self.op_binary(t, stack)
             elif t.kind == "name":
                 self.compile_name(t, ctx, stack, pad)
             else:
                 raise IonaError(t.lineno, f"unexpected token {t.value!r}")
+
+    def op_addr(self, t, stack):
+        if not stack:
+            raise IonaError(t.lineno, "`$` (address-of) needs a value")
+        v = stack.pop()
+        if not v.lvalue:
+            raise IonaError(t.lineno, "cannot take the address of this expression")
+        stack.append(Value(f"(&{v.expr})", Ptr(v.type), lvalue=False))
+
+    def op_deref(self, t, stack):
+        if not stack:
+            raise IonaError(t.lineno, "`^` (dereference) needs a pointer")
+        v = stack.pop()
+        if not isinstance(v.type, Ptr):
+            raise IonaError(t.lineno, f"`^` needs a pointer, got {v.type.iname()}")
+        stack.append(Value(f"(*{v.expr})", v.type.e, lvalue=True))
 
     def op_field(self, t, stack):
         if not stack:
