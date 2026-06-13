@@ -1,18 +1,18 @@
 ; EXERCISES ARITHMETIC, COMPARISONS, CONDITIONALS, AND NESTED CALLS.
 
-!MAX A B
+!MAX W, A W, B W
     A B < ?
         B @
     /
         A @
 
-!MAIN
+!MAIN W
     2 3 4 * + PRINT          ; 2 + (3*4) = 14
     20 7 % PRINT             ; 6
     100 9 / PRINT            ; 11
     3 8 MAX PRINT            ; 8
     8 3 MAX PRINT            ; 8
-    5 5 = ?                 ; EQUALITY IS `=`
+    5 5 = ?                  ; EQUALITY IS `=`
         "EQUAL" PRINT
     /
         "NO" PRINT

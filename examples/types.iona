@@ -1,0 +1,17 @@
+; SCALAR TYPES (B/W/F), EXPLICIT CONVERSIONS, AND A VOID FUNCTION.
+; THERE ARE NO IMPLICIT CONVERSIONS: CROSSING W/B/F NEEDS A CONVERSION FUNCTION.
+
+!SQUARE F, X F
+    X X * @
+
+!SHOUT V, MSG $B
+    MSG PRINT
+
+!MAIN W
+    !N W
+    7 N!
+    N PRINT                 ; 7    -- W, printed with %zu
+    2.5 SQUARE PRINT        ; 6.25 -- F literal, squared
+    N W2F SQUARE PRINT      ; 49   -- W converted to F, then squared
+    65 W2B PRINT            ; 65   -- W converted to B (a byte), printed numerically
+    "DONE" SHOUT            ; DONE -- a void function taking a `$B` string

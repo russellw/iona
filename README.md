@@ -1,10 +1,11 @@
 # Iona
 
-Iona is an experimental systems programming language. It combines three ideas
-that are not usually found together:
+Iona is an experimental systems programming language. It combines ideas that are
+not usually found together:
 
 - **A systems language**, like C or Pascal: it compiles directly to machine
-  code and has no garbage collector. Values are plain machine words.
+  code, has no garbage collector, and is statically typed with **no implicit
+  conversions**.
 - **Indentation-based block structure**, like Python but terser: a `!`-prefixed
   definition, a `?` conditional, and a `&` loop open an indented suite with no
   `begin`/`end`, braces, or even a trailing colon — the indentation alone
@@ -38,13 +39,13 @@ python3 tests/run_tests.py
 A program is a sequence of `!`-prefixed declarations. Execution begins at `MAIN`.
 
 ```
-!FACTORIAL N
+!FACTORIAL W, N W
     N 1 <= ?
         1 @
     /
         N  N 1 - FACTORIAL  *  @
 
-!MAIN
+!MAIN W
     5 FACTORIAL PRINT     ; 120
 ```
 
@@ -59,7 +60,6 @@ consequences shape the surface syntax:
   printed a left-arrow on a 1963 machine).
 - **Terse operators.** Equality is `=` and not-equal is `<>` (ALGOL-style, and
   the `==`/`!=` convention is a 1972-era C-ism). Assignment is a single `!`.
-  All are typeable on the machine.
 
 ### Lines are postfix token streams
 
@@ -71,26 +71,79 @@ generated code is ordinary efficient C with no runtime stack.
 - `N 1 -`  →  `N - 1`
 - `A B MAX`  →  `MAX(A, B)`
 
-### Declarations read prefix
+### Types
 
-Declarations are the one deliberate exception to postfix order, because they
-name a thing rather than compute a value. A definition is marked by a `!`
-prefixed to the name:
+Every parameter, local, and return type is written **explicitly** — there are no
+defaults — and the type follows the name. The scalar types are one letter each:
+
+| Type | Meaning | C type |
+|------|---------|--------|
+| `V`  | void    | `void` |
+| `B`  | byte    | `char` |
+| `W`  | word (the natural machine integer) | `size_t` |
+| `F`  | float   | `double` |
+
+A pointer is `$` prefixed to a type, and type expressions read **prefix /
+outside-in**, the way you say them:
 
 ```
-!NAME PARAM1 PARAM2
-    <body>
+$W            pointer to word
+$$B           pointer to pointer to byte
+$POINT        pointer to record POINT
+```
+
+A string literal has type `$B` (pointer to byte). *(Records `R` and arrays `A`
+are reserved in the grammar but not implemented yet — they arrive with the
+field- and index-access operators.)*
+
+### Definitions
+
+A definition is a `!` followed by comma-separated `NAME TYPE` groups: the first
+group is the function name and its return type, the rest are parameters.
+
+```
+!FACTORIAL W, N W            ; FACTORIAL(N: W) : W
+!AVG F, X F, Y F             ; AVG(X: F, Y: F) : F
+!SHOUT V, MSG $B             ; SHOUT(MSG: $B) : void
+!MAIN W                      ; MAIN() : W   (no params, so no comma)
 ```
 
 The same `!` serves as assignment when *suffixed* to a name (`VALUE NAME!`); the
 two never collide, because the definition `!` is line-initial while the
-assignment `!` always trails its operands. All parameters and values are
-integers in v0.
+assignment `!` always trails its operands.
+
+### Locals and assignment
+
+A local is declared with a `!`-prefixed `NAME TYPE` line, then assigned with the
+postfix `!`. Assignment requires the value's type to match the variable's.
+
+```
+!N W           ; declare N : W
+5 N!           ; N = 5
+N 1 + N!       ; N = N + 1
+```
+
+### No implicit conversions
+
+Arithmetic and comparison require both operands to have the **same** type, and
+nothing is coerced automatically. To cross between `B`, `W`, and `F` you call an
+explicit conversion function (each lowers to a single C cast):
+
+```
+B2W  W2B   W2F  F2W   B2F  F2B
+```
+
+```
+!N W
+7 N!
+N W2F SQUARE PRINT     ; convert W -> F, then call a function taking F
+```
 
 ### Control flow reads postfix
 
 The condition is evaluated first and the trailing marker consumes it — `?` for
-a conditional, `&` for a loop. A lone `/` on its own line is the else branch:
+a conditional, `&` for a loop. A lone `/` on its own line is the else branch.
+A condition is a `W` (a comparison yields `W`, and nonzero is true):
 
 ```
 N 0 > ?
@@ -112,45 +165,26 @@ skipped side is never evaluated.
 ```
 X 0 >  X 100 <  AND ?          ; 0 < X < 100
     "IN RANGE" PRINT
-
-P 0 =  P VALID  OR ?           ; `P VALID` is not called when P = 0
-    "OK" PRINT
-
-DONE NOT &
-    STEP
 ```
 
 They are control-flow words, not value-producing operators, so they are allowed
-**only** in the condition of a `?` or `&`. They do not double as bitwise
-operators: a future bitwise set will get its own spelling (and since `| ^ ~`
-are not on a 1960s teletype, word forms are the likely choice).
-
-Under the hood a condition is compiled as *jumping code*: instead of computing a
-`0`/`1` and testing it, each part branches straight to a true- or false-label.
-That one mechanism yields both short-circuit evaluation and tight fused
-compare-and-branch output, with no boolean ever materialized in a register.
-
-### Assignment
-
-Assignment is itself a postfix operator: push a value, then the target name with
-`!` suffixed. Variables are declared automatically on first assignment.
-
-```
-5 X!           ; X = 5
-X 1 + X!       ; X = X + 1
-```
+**only** in the condition of a `?` or `&`. Under the hood a condition is compiled
+as *jumping code*: instead of computing a `0`/`1` and testing it, each part
+branches straight to a true- or false-label. That one mechanism yields both
+short-circuit evaluation and tight fused compare-and-branch output.
 
 ### Built-ins
 
-| Form        | Meaning                                  |
-|-------------|------------------------------------------|
-| `+ - * / %` | integer arithmetic                       |
-| `= <> < > <= >=` | comparisons (yield `0` / `1`)       |
+| Form | Meaning |
+|------|---------|
+| `+ - * / %` | arithmetic on two operands of the same numeric type (`%` not on `F`) |
+| `= <> < > <= >=` | comparisons of two same-typed operands (yield `W`, `0`/`1`) |
 | `AND OR NOT` | short-circuit logical operators (conditions only) |
-| `VALUE NAME!` | assign `VALUE` into `NAME`              |
-| `X PRINT`   | print an integer or string, then newline |
-| `V @`       | set the function's return value to `V`    |
-| `@`         | set the function's return value to `0`    |
+| `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
+| `VALUE NAME!` | assign `VALUE` into `NAME` (types must match) |
+| `X PRINT` | print a `B`, `W`, `F`, or string value, then a newline |
+| `V @` | set the function's result to `V` (its type must match the return type) |
+| `@` | in a `V` (void) function, the valueless return marker |
 
 ### Return values and cleanup
 
@@ -161,7 +195,7 @@ the end of the function, which is the single point where it actually returns.
 Anything after a `@` still runs:
 
 ```
-!READSQUARED X
+!READSQUARED W, X W
     "OPEN FILE" PRINT
     X X * @               ; set the result
     "CLOSE FILE" PRINT    ; still runs -- cleanup is never skipped
@@ -171,13 +205,13 @@ Anything after a `@` still runs:
 
 A consequence: because `@` no longer skips the rest of the function, use a `?`
 with its `/` else branch (not a bare early `@`) when one branch must not run the
-other. A function's return value defaults to `0` if `@` is never reached.
+other. A non-void function's result defaults to `0` if no `@` is reached.
 
 ### Literals and comments
 
-- Integer literals: `0`, `42`, `3628800`.
-- String literals: `"HELLO"` (usable as a `PRINT` argument), with `\n`, `\t`,
-  `\"`, `\\` escapes.
+- Integer literals are `W`: `0`, `42`, `3628800`.
+- Float literals are `F` and need a decimal point: `2.5`, `3.14`.
+- String literals are `$B`: `"HELLO"`, with `\n`, `\t`, `\"`, `\\` escapes.
 - Comments run from `;` to end of line.
 - Indentation uses spaces; tabs are rejected.
 
@@ -188,25 +222,25 @@ other. A function's return value defaults to `0` if `@` is never reached.
 1. **Tokenizer** — splits each physical line into postfix tokens.
 2. **Line reader** — measures indentation and drops blank/comment lines.
 3. **Block parser** — turns indentation into a nested AST of `!`-definitions,
-   `?`-conditionals, `&` loops, and statement nodes.
-4. **Code generator** — lowers each postfix statement by walking the tokens
-   with a *compile-time operand stack* of C expression strings. Function calls
-   are materialized into temporaries so evaluation order is well defined.
-   Conditions take a separate path: they are built into a small boolean tree
-   and emitted as *jumping code* (branches to true/false labels) so that
-   `AND`/`OR`/`NOT` short-circuit and compile to fused compare-and-branch.
+   typed locals, `?`-conditionals, `&` loops, and statement nodes.
+4. **Code generator** — type-checks while lowering each postfix statement,
+   walking the tokens with a *compile-time operand stack* of typed C
+   expressions. Function calls are materialized into temporaries so evaluation
+   order is well defined. Conditions take a separate path: they are built into a
+   small boolean tree and emitted as *jumping code* (branches to true/false
+   labels) so that `AND`/`OR`/`NOT` short-circuit and compile to fused
+   compare-and-branch.
 
 ## Status and roadmap
 
-v0 is intentionally small but runs real recursive and iterative programs (see
-`examples/` and `tests/`). Natural next steps:
+v0 runs real recursive and iterative programs and statically type-checks them
+(see `examples/` and `tests/`). Natural next steps:
 
-- More types (`bool`, fixed-width ints, pointers, `char`/strings) with a real
-  type checker rather than int-everywhere.
+- **Records (`R`) and arrays (`A`)** with their access operators: field `.`,
+  index `[ ]`, and pointer dereference / address-of. Arrays are value types and
+  do **not** decay to pointers. (The type grammar already reserves `R`/`A`/`$`.)
 - `for` loops; bitwise operators as value operators, kept distinct from the
-  short-circuit logical `AND`/`OR`/`NOT`. Their spelling is still open: the
-  usual `| ^ ~` are not on a 1960s teletype, so word forms are the
-  period-accurate choice.
-- Struct / record types and manual memory (stack, arena, or `malloc`/`free`).
+  short-circuit logical `AND`/`OR`/`NOT` (and since `| ^ ~` are not on a 1960s
+  teletype, word forms are the period-accurate choice).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.
