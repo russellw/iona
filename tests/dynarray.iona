@@ -1,0 +1,29 @@
+; DYNAMIC ALLOCATION: `P N NEWA` allocates a zero-initialized buffer of N
+; elements (a runtime count) and points P at it; index it with the pointer
+; subscript `P I [`. `$V` is a raw void pointer that converts to and from any
+; pointer with no cast.
+
+!SUMBUF W, BUF $W, N W         ; sum N elements of a $W buffer (passed by pointer)
+    !S W
+    !I W
+    0 S!
+    I, 0, N &
+        BUF I [  S +  S!
+    S @
+
+!MAIN W
+    !BUF $W
+    !RAW $V
+    !I W
+
+    BUF 5 NEWA                 ; allocate 5 words on the heap
+    I, 0, 5 &
+        I 10 *  BUF I [ !      ; BUF[I] = I * 10  ->  0 10 20 30 40
+    BUF 5 SUMBUF PRINT         ; 0+10+20+30+40 = 100
+
+    BUF RAW!                   ; $W -> $V  (no conversion)
+    RAW BUF!                   ; $V -> $W  (round-trip, same buffer)
+    BUF 3 [ PRINT              ; 30
+
+    BUF FREE
+    0 @

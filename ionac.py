@@ -282,6 +282,20 @@ def zero_init(t):
     return "{0}" if is_aggregate(t) else "0"
 
 
+def assignable(tt, vt):
+    """Whether a value of type `vt` may flow into a slot of type `tt` (assignment,
+    argument, return). Distinct typed pointers do not mix, but `NULL` fits any
+    pointer and a `$V` (void) pointer converts to/from any pointer freely."""
+    if tt == vt:
+        return True
+    if isinstance(tt, Ptr):
+        if vt == NULLT:
+            return True
+        if isinstance(vt, Ptr) and (tt.e == VOID or vt.e == VOID):
+            return True
+    return False
+
+
 def parse_type_expr(toks, lineno, records):
     """Parse a prefix type expression that must occupy all of `toks`.
 
@@ -837,6 +851,8 @@ class CodeGen:
         if isinstance(s, Decl):
             if s.name in ctx.vars:
                 raise IonaError(s.lineno, f"`{s.name}` is already declared")
+            if s.type == VOID:
+                raise IonaError(s.lineno, "cannot declare a `V` (void) variable")
             ctx.vars[s.name] = s.type
             ctx.emit(f"{pad}{self.ctype(s.type)} {s.name} = {zero_init(s.type)};")
             return
@@ -909,7 +925,7 @@ class CodeGen:
         if len(args) != len(d.params):
             raise IonaError(lineno, f"`{d.name}` takes {len(d.params)} argument(s), got {len(args)}")
         for k, (a, (pn, pt)) in enumerate(zip(args, d.params), start=1):
-            if a.type != pt and not (isinstance(pt, Ptr) and a.type == NULLT):
+            if not assignable(pt, a.type):
                 raise IonaError(lineno, f"argument {k} of `{d.name}` expects "
                                         f"{pt.iname()}, got {a.type.iname()}")
 
@@ -928,6 +944,9 @@ class CodeGen:
             if isinstance(a.type, Ptr) and self._is_null(b):
                 return
             if isinstance(b.type, Ptr) and self._is_null(a):
+                return
+            if isinstance(a.type, Ptr) and isinstance(b.type, Ptr) \
+                    and (a.type.e == VOID or b.type.e == VOID):
                 return
         raise IonaError(lineno, f"comparison `{op}` needs both operands the same type "
                                 f"(got {a.type.iname()} and {b.type.iname()})")
@@ -1013,7 +1032,7 @@ class CodeGen:
                     a = self.as_bool(stack.pop())
                     cls = AndNode if name == "AND" else OrNode
                     stack.append(cls(a, b, t.lineno))
-                elif name in ("PRINT", "NEW", "FREE"):
+                elif name in ("PRINT", "NEW", "NEWA", "FREE"):
                     raise IonaError(t.lineno, f"`{name}` cannot be used in a condition")
                 elif name in CONVERSIONS:
                     if not stack:
@@ -1122,11 +1141,7 @@ class CodeGen:
         if isinstance(node, IndexNode):
             arr = self.emit_value(node.arr, ctx, pad)
             idx = self.emit_value(node.idx, ctx, pad)
-            if not isinstance(arr.type, Array):
-                raise IonaError(node.lineno, f"`[` needs an array, got {arr.type.iname()}")
-            if idx.type != WORD:
-                raise IonaError(node.lineno, f"array index must be W, got {idx.type.iname()}")
-            return Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue)
+            return self.do_index(arr, idx, node.lineno)
         if isinstance(node, AddrNode):
             v = self.emit_value(node.x, ctx, pad)
             if not v.lvalue:
@@ -1136,6 +1151,8 @@ class CodeGen:
             v = self.emit_value(node.x, ctx, pad)
             if not isinstance(v.type, Ptr):
                 raise IonaError(node.lineno, f"`^` needs a pointer, got {v.type.iname()}")
+            if v.type.e == VOID:
+                raise IonaError(node.lineno, "cannot dereference a `$V` pointer; assign it to a typed pointer first")
             return Value(f"(*{v.expr})", v.type.e, lvalue=True)
         if isinstance(node, BinNode):
             a = self.emit_value(node.a, ctx, pad)
@@ -1216,6 +1233,8 @@ class CodeGen:
         v = stack.pop()
         if not isinstance(v.type, Ptr):
             raise IonaError(t.lineno, f"`^` needs a pointer, got {v.type.iname()}")
+        if v.type.e == VOID:
+            raise IonaError(t.lineno, "cannot dereference a `$V` pointer; assign it to a typed pointer first")
         stack.append(Value(f"(*{v.expr})", v.type.e, lvalue=True))
 
     def op_field(self, t, stack):
@@ -1229,14 +1248,22 @@ class CodeGen:
 
     def op_index(self, t, stack):
         if len(stack) < 2:
-            raise IonaError(t.lineno, "`[` needs an array and an index")
+            raise IonaError(t.lineno, "`[` needs a base and an index")
         idx = stack.pop()
         arr = stack.pop()
-        if not isinstance(arr.type, Array):
-            raise IonaError(t.lineno, f"`[` needs an array, got {arr.type.iname()}")
+        stack.append(self.do_index(arr, idx, t.lineno))
+
+    def do_index(self, arr, idx, lineno):
+        """Subscript an array (`ARR I [`) or a pointer (`P I [`) -> an lvalue."""
         if idx.type != WORD:
-            raise IonaError(t.lineno, f"array index must be W, got {idx.type.iname()}")
-        stack.append(Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue))
+            raise IonaError(lineno, f"index must be W, got {idx.type.iname()}")
+        if isinstance(arr.type, Array):
+            return Value(f"({arr.expr}).a[{idx.expr}]", arr.type.e, lvalue=arr.lvalue)
+        if isinstance(arr.type, Ptr):
+            if arr.type.e == VOID:
+                raise IonaError(lineno, "cannot index a `$V` pointer; assign it to a typed pointer first")
+            return Value(f"({arr.expr})[{idx.expr}]", arr.type.e, lvalue=True)
+        raise IonaError(lineno, f"`[` needs an array or pointer, got {arr.type.iname()}")
 
     def op_binary(self, t, stack):
         if len(stack) < 2:
@@ -1258,7 +1285,7 @@ class CodeGen:
         value = stack.pop()
         if not target.lvalue:
             raise IonaError(t.lineno, "assignment target is not a variable, field, or element")
-        if value.type != target.type and not (isinstance(target.type, Ptr) and value.type == NULLT):
+        if not assignable(target.type, value.type):
             raise IonaError(t.lineno, f"cannot assign {value.type.iname()} to a target "
                                       f"of type {target.type.iname()}")
         ctx.emit(f"{pad}{target.expr} = {value.expr};")
@@ -1272,7 +1299,7 @@ class CodeGen:
         if not stack:
             raise IonaError(t.lineno, f"`@` needs a value (this function returns {ctx.ret.iname()})")
         v = stack.pop()
-        if v.type != ctx.ret and not (isinstance(ctx.ret, Ptr) and v.type == NULLT):
+        if not assignable(ctx.ret, v.type):
             raise IonaError(t.lineno, f"`@` returns {ctx.ret.iname()} but the value is {v.type.iname()}")
         ctx.emit(f"{pad}_ret = {v.expr};")
 
@@ -1307,8 +1334,26 @@ class CodeGen:
                 raise IonaError(t.lineno, "`NEW` needs an assignable pointer (variable, field, or element)")
             if not isinstance(v.type, Ptr):
                 raise IonaError(t.lineno, f"`NEW` needs a pointer, got {v.type.iname()}")
+            if v.type.e == VOID:
+                raise IonaError(t.lineno, "`NEW` cannot allocate a `$V` (sizeless) pointer")
             ct = self.ctype(v.type.e)
             ctx.emit(f"{pad}{v.expr} = ({ct}*)calloc(1, sizeof({ct}));")
+            return
+        if name == "NEWA":
+            if len(stack) < 2:
+                raise IonaError(t.lineno, "`NEWA` needs a pointer and a count")
+            n = stack.pop()
+            v = stack.pop()
+            if not v.lvalue:
+                raise IonaError(t.lineno, "`NEWA` needs an assignable pointer (variable, field, or element)")
+            if not isinstance(v.type, Ptr):
+                raise IonaError(t.lineno, f"`NEWA` needs a pointer, got {v.type.iname()}")
+            if v.type.e == VOID:
+                raise IonaError(t.lineno, "`NEWA` cannot allocate a `$V` (sizeless) pointer")
+            if n.type != WORD:
+                raise IonaError(t.lineno, f"`NEWA` count must be W, got {n.type.iname()}")
+            ct = self.ctype(v.type.e)
+            ctx.emit(f"{pad}{v.expr} = ({ct}*)calloc({n.expr}, sizeof({ct}));")
             return
         if name == "FREE":
             if not stack:

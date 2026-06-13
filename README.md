@@ -99,6 +99,11 @@ $POINT        pointer to record POINT
 A string literal has type `$B` (pointer to byte). Arrays and records are
 **value types**: assigning, passing, or returning one copies the whole thing.
 
+`$V` (pointer to void) is a raw memory pointer: it converts to and from any
+pointer type with no explicit conversion (distinct *typed* pointers still do
+not mix). It cannot itself be dereferenced or indexed — assign it to a typed
+pointer first.
+
 ### Records
 
 A record is defined with `!R NAME` and an indented suite of `FIELD TYPE` lines.
@@ -163,9 +168,12 @@ pointer dereference.)
 
 There is no garbage collector. `P NEW` allocates a fresh, zero-initialized
 object on the heap and points `P` at it (the type to allocate is `P`'s own
-pointed-to type); `P FREE` releases it. A pointer is null until allocated. The
-literal `NULL` is the null pointer for *any* pointer type — it can be assigned,
-compared, passed, and returned — and a pointer also compares against `0`:
+pointed-to type); `P N NEWA` allocates a buffer of `N` elements (a runtime
+count); and `P FREE` releases either. A `$T` buffer is indexed with the same
+postfix `[` as an array — `P I [` is `P[I]`. A pointer is null until allocated.
+The literal `NULL` is the null pointer for *any* pointer type — it can be
+assigned, compared, passed, and returned — and a pointer also compares against
+`0`:
 
 ```
 !R NODE
@@ -180,6 +188,18 @@ compared, passed, and returned — and a pointer also compares against `0`:
     HEAD N^.NEXT !             ; N->NEXT = HEAD (null at first)
     N HEAD!
     ; ... walk with `P 0 <> &`, then free each node with `P FREE`
+```
+
+A dynamically-sized buffer uses `NEWA` and the pointer subscript:
+
+```
+!MAIN W
+    !BUF $W
+    !I W
+    BUF 5 NEWA                 ; a buffer of 5 words
+    I, 0, 5 &
+        I 10 *  BUF I [ !      ; BUF[I] = I * 10
+    BUF FREE
 ```
 
 
@@ -285,11 +305,12 @@ unary `BNOT`. The `B` prefix keeps them distinct from the logical words above
 | `BAND BOR BXOR BSHL BSHR` | bitwise `& \| ^ << >>` (integer values) |
 | `BNOT` | bitwise complement `~` (unary) |
 | `REC.FIELD` | read/write a record field |
-| `ARR I [` | subscript an array (postfix): `ARR[I]` |
+| `ARR I [` | subscript an array or pointer (postfix): `ARR[I]` |
 | `X$` | address of an lvalue (a pointer) |
 | `P^` | dereference a pointer (an lvalue) |
-| `P NEW` | allocate a zero-initialized object on the heap, point `P` at it |
-| `P FREE` | free the object `P` points at |
+| `P NEW` | allocate one zero-initialized object on the heap, point `P` at it |
+| `P N NEWA` | allocate a zero-initialized buffer of `N` elements |
+| `P FREE` | free what `P` points at |
 | `NULL` | the null pointer (any pointer type) |
 | `B2W W2B W2F F2W B2F F2B` | explicit type conversions |
 | `VALUE TARGET!` | assign into a variable, field, or element (types must match) |
@@ -349,7 +370,6 @@ v0 runs real recursive and iterative programs, statically type-checks them, and
 supports records, arrays, pointers, and heap allocation — enough for genuine
 linked structures (see `examples/heap.iona`). Natural next steps:
 
-- A typed allocation that takes a runtime count (dynamic arrays).
 - A counted-loop step / count-down (today the step is fixed at `+1`).
 - Multiple return values and the stack-effect comments Forth is known for.
 - A direct native backend (assembly or LLVM) to drop the C dependency.
